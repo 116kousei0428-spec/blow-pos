@@ -349,6 +349,13 @@ table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid
 #castCards .card{min-width:0}
 @media(max-width:1000px){#castCards{grid-template-columns:repeat(2,minmax(220px,1fr))}}
 @media(max-width:600px){#castCards{grid-template-columns:1fr}}
+
+/* 社長閲覧専用モード */
+.otp-active{background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:12px;padding:8px 10px;font-weight:900;font-size:12px}.log-diff{white-space:pre-wrap;line-height:1.45}.viewer-badge{display:none;background:#7c3aed;color:#fff;font-weight:900;padding:7px 12px;border-radius:999px;font-size:13px}
+body.viewer-mode .viewer-badge{display:inline-flex}
+body.viewer-mode #casts,body.viewer-mode #backup,body.viewer-mode #cloud,body.viewer-mode #settings{display:none!important}
+body.viewer-mode .viewer-hidden{display:none!important}
+body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mode textarea:disabled{opacity:.75;background:#f1f5f9;color:#334155}
 </style>
 </head>
 <body>
@@ -367,10 +374,11 @@ table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid
 <div class="app locked">
   <div class="top">
     <div><div class="title">BLOW 奄美 POS v1.0 / beta57 full移植</div><div class="sub" id="nowLabel"></div></div>
-    <div class="row"><div class="card stat"><div class="label">本日売上</div><div class="val" id="salesTop">¥0</div></div><div class="card stat"><div class="label">稼働見込</div><div class="val" id="runTop">¥0</div></div></div>
+    <div class="row"><span class="viewer-badge">社長閲覧モード</span><div class="card stat"><div class="label">本日売上</div><div class="val" id="salesTop">¥0</div></div><div class="card stat"><div class="label">稼働見込</div><div class="val" id="runTop">¥0</div></div></div>
   </div>
   <div class="tabs no-print">
     <button class="tab active" data-screen="tables" onclick="openScreen('tables')">卓</button>
+    <button class="tab privileged-only" data-screen="overview" onclick="openScreen('overview')">一覧</button>
     <button class="tab" data-screen="casts" onclick="openScreen('casts')">キャスト</button>
     <button class="tab" data-screen="manage" onclick="openScreen('manage')">管理</button>
     <button class="tab" data-screen="backup" onclick="openScreen('backup')">バックアップ</button>
@@ -380,6 +388,7 @@ table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid
   <div class="pwa-note no-print">スマホはブラウザメニューから「ホーム画面に追加」でアプリ風に起動できます。</div>
   <nav class="mobile-bottom-nav no-print" aria-label="スマホメニュー">
     <button class="active" data-screen="tables" onclick="openScreen('tables')"><span class="ico">🏠</span>卓</button>
+    <button class="privileged-only" data-screen="overview" onclick="openScreen('overview')"><span class="ico">📋</span>一覧</button>
     <button data-screen="casts" onclick="openScreen('casts')"><span class="ico">👧</span>キャスト</button>
     <button data-screen="manage" onclick="openScreen('manage')"><span class="ico">💴</span>管理</button>
     <button data-screen="backup" onclick="openScreen('backup')"><span class="ico">💾</span>保存</button>
@@ -388,10 +397,11 @@ table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid
   </nav>
 
   <section id="tables" class="screen active"><div class="layout"><div class="cards" id="tableCards"></div><div class="card" id="tablePanel"></div></div></section>
+  <section id="overview" class="screen"><div class="row"><h2>営業一覧</h2><button class="btn out" onclick="renderOverview()">再読み込み</button></div><p class="muted">全卓の稼働状況、本日の会計、キャスト出勤状況を一画面で確認できます。社長・管理者専用の閲覧画面です。</p><div id="overviewArea"></div></section>
   <section id="casts" class="screen"><div class="row"><h2>キャスト出退勤</h2><button class="btn warn" onclick="clockOutAll()">一括退勤</button></div><div class="cards" id="castCards"></div><div class="card" style="margin-top:12px"><h2>キャスト登録・編集</h2><div class="grid3"><div><label>名前</label><input id="newCast"></div><div><label>控除率</label><select id="newCastDeduction"><option value="10.21">10.21%</option><option value="11">11%</option><option value="20">20%</option></select></div><div><label>任意控除率</label><input id="newCastDeductionCustom" type="number" step="0.01" placeholder="空なら店舗標準"></div></div><button class="btn" style="margin-top:8px" onclick="addCast()">追加</button><div class="scroll" style="margin-top:10px"><table><thead><tr><th>名前/状態</th><th>名前変更</th><th>給与・バック</th><th>操作</th></tr></thead><tbody id="castSettingRows"></tbody></table></div></div></section>
   <section id="manage" class="screen">
-    <div class="row"><h2>管理</h2><button class="btn ok" onclick="startBusinessDay()">営業開始</button><button class="btn blue" onclick="openClosingSheetInput()">締め票入力</button><button class="btn bad" onclick="endBusinessDay()">営業終了</button><button class="btn blue" onclick="makeClosing()">締め票作成</button><button class="btn out" onclick="openHistoryPanel()">履歴</button><button class="btn blue admin-only" onclick="openReceiptEditPanel()">伝票修正</button><button class="btn warn" onclick="openUnpaidPanel()">未収</button><button class="btn warn" onclick="openProfitLock()">利益率</button><button class="btn out" onclick="makeMonthly()">月締め票</button><button class="btn out" onclick="saveBackupManual()">バックアップ保存</button><button class="btn blue" onclick="openScreen('backup')">バックアップを見る</button></div>
-    <div class="summary" id="manageSummary"></div>
+    <div class="row"><h2>管理</h2><button class="btn ok" onclick="startBusinessDay()">営業開始</button><button class="btn blue" onclick="openClosingSheetInput()">締め票入力</button><button class="btn bad" onclick="endBusinessDay()">営業終了</button><button class="btn blue" onclick="makeClosing()">締め票作成</button><button class="btn out" onclick="openHistoryPanel()">履歴</button><button class="btn blue" onclick="openReceiptEditPanel()">伝票修正</button><button class="btn ok admin-only" onclick="generateReceiptEditOtp()">修正権限発行</button><button class="btn out admin-only" onclick="renderReceiptAuditPanel(true)">修正ログ</button><span id="receiptGrantStatus" class="otp-active" style="display:none"></span><button class="btn warn" onclick="openUnpaidPanel()">未収</button><button class="btn warn" onclick="openProfitLock()">利益率</button><button class="btn out" onclick="makeMonthly()">月締め票</button><button class="btn out" onclick="saveBackupManual()">バックアップ保存</button><button class="btn blue" onclick="openScreen('backup')">バックアップを見る</button></div>
+    <div class="summary" id="manageSummary"></div><div id="visitorCountArea" style="margin-top:12px"></div><div id="receiptAuditArea" class="admin-only" style="display:none;margin-top:12px"></div>
     <div id="profitArea" style="display:none;margin-top:12px"></div>
     <div class="grid2" style="margin-top:12px">
       <div class="card"><h3>仕入れ支出</h3><div class="grid2"><div><label>内容</label><input id="exName"></div><div><label>金額</label><input id="exAmount" type="number"></div></div><button class="btn" style="margin-top:8px" onclick="addExpense()">支出追加</button><div class="scroll" style="margin-top:10px"><table><thead><tr><th>内容</th><th class="right">金額</th><th></th></tr></thead><tbody id="expenseRows"></tbody></table></div></div>
@@ -642,25 +652,25 @@ table{border-collapse:collapse;width:100%;background:#fff}th,td{border:1px solid
 
 <div id="receiptEditPassModal" class="modal"><div class="box" style="max-width:420px">
   <div class="row"><h2>伝票修正ロック</h2><button class="btn out small" onclick="closeModal('receiptEditPassModal')">閉じる</button></div>
-  <p class="muted">伝票修正を開くにはパスワードを入力してください。</p>
-  <input id="receiptEditPassInput" type="password" placeholder="****" onkeydown="if(event.key==='Enter')unlockReceiptEdit()">
+  <p class="muted">こうせいが発行した6桁コードを入力すると、この端末だけ30分間、伝票修正が開放されます。</p>
+  <input id="receiptEditPassInput" type="password" placeholder="6桁コード" inputmode="numeric" maxlength="6" onkeydown="if(event.key==='Enter')unlockReceiptEdit()">
   <p id="receiptEditPassError" class="muted" style="color:#dc2626"></p>
   <button class="btn ok" style="width:100%" onclick="unlockReceiptEdit()">解除</button>
 </div></div>
 
 <script>
 
-const KEY='blow_amami_pos_v1_full', PASS='3112', ADMIN_PASS='2005170428', PROFIT_PASS='3112', HISTORY_PASS='3112', TABLES=['C1','C2','C3','C4','A1','A2','A3','A4','A5'];
+const KEY='blow_amami_pos_v1_full', PASS='3112', ADMIN_PASS='2005170428', VIEWER_PASS='0120', PROFIT_PASS='3112', HISTORY_PASS='3112', RECEIPT_GRANT_MS=30*60*1000, TABLES=['C1','C2','C3','C4','A1','A2','A3','A4','A5'];
 const CLOUD_KEY='blow_amami_pos_cloud_sync_v1';
 const BASIC_SET_MIN=60, HALF_EXTEND_MIN=30, FULL_EXTEND_MIN=60;
 const JOUNAI_BACK=500;
 const CH=[['ori','オリシャン','オリシャン',25000,4000],['orivip','オリシャンVIP','オリシャン',40000,5000],['vy','ヴーヴイエロー','ヴーヴ',30000,8000],['vw','ヴーヴホワイト','ヴーヴ',35000,9000],['moet','モエピカ','モエ',50000,10000],['belle','ベルエポック','ベル',80000,25000],['beller','ベルエポックロゼ','ベル',150000,46000],['soumei','ソウメイ','ソウメイ',100000,28000],['soumeib','ソウメイブルー','ソウメイ',150000,45000],['soumeir','ソウメイロゼ','ソウメイ',180000,48000],['soumeip','ソウメイプラチナ','ソウメイ',300000,80000],['ag','アルマンドゴールド','アルマンド',200000,50000],['ap','アルマンドピンク','アルマンド',280000,70000],['agr','アルマンドグリーン','アルマンド',350000,100000],['as','アルマンド信号機','アルマンド',800000,0]].map(x=>({id:x[0],name:x[1],cat:x[2],price:x[3],cost:x[4]}));
-let now=new Date(), active='C1', target='', startId='', receiptEditPending=null, profitUnlocked=sessionStorage.getItem('lounge_pos_profit_unlocked')==='1', historyUnlocked=sessionStorage.getItem('lounge_pos_history_unlocked')==='1', receiptEditUnlocked=sessionStorage.getItem('lounge_pos_receipt_edit_unlocked')==='1';
+let now=new Date(), active='C1', target='', startId='', receiptEditPending=null, profitUnlocked=sessionStorage.getItem('lounge_pos_profit_unlocked')==='1', historyUnlocked=sessionStorage.getItem('lounge_pos_history_unlocked')==='1', receiptEditUnlocked=false, receiptEditGrantUntil=Number(sessionStorage.getItem('lounge_pos_receipt_edit_until')||0);
 function emptyTable(id){return{id,status:'empty',startedAt:null,serviceMinutes:BASIC_SET_MIN,guests:1,payment:'cash',nominations:[],dohan:[],jounai:[],jounaiCounts:{},after:[],items:[],prepayments:[],note:''}}
 function init(){return{businessDate:bizDate(),casts:[],tables:TABLES.map(emptyTable),sales:[],expenses:[]}}
 let state=(()=>{try{return{...init(),...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{return init()}})();
 state.cashFlows=state.cashFlows||[]; state.closings=state.closings||[]; state.orderDeleteLogs=state.orderDeleteLogs||[]; state.businessSheets=state.businessSheets||[];
-state.unpaids=state.unpaids||[]; state.backups=state.backups||[]; state.payrollLocks=state.payrollLocks||{}; state.manualClosingSheets=state.manualClosingSheets||[]; state.manualClosingDaySheets=state.manualClosingDaySheets||[];
+state.unpaids=state.unpaids||[]; state.backups=state.backups||[]; state.payrollLocks=state.payrollLocks||{}; state.visitorEntries=state.visitorEntries||[]; state.receiptEditAudit=state.receiptEditAudit||[]; state.receiptEditOtp=state.receiptEditOtp||null; state.manualClosingSheets=state.manualClosingSheets||[]; state.manualClosingDaySheets=state.manualClosingDaySheets||[];
 const DEFAULT_BACK_SETTINGS={hourly:2500,deductionRate:10.21,dbBack:300,sbBack:600,jounaiBack:500,dohanBack:2000,afterBack:1000,nomSetBack:1000,nomSubRate:5,wheelNomRate:20,wheelFreeRate:10,wheelFullFreeRate:20,champNomRate:20,champFreeRate:10,champFullFreeRate:20,raiseNomDohan:300,raiseAfter:200,raiseBoth:500};
 function normalizeBackSettings(v={}){let o={...DEFAULT_BACK_SETTINGS,...(v||{})};Object.keys(DEFAULT_BACK_SETTINGS).forEach(k=>{o[k]=Number(o[k]);if(!Number.isFinite(o[k]))o[k]=DEFAULT_BACK_SETTINGS[k];});return o}
 state.defaultBackSettings=normalizeBackSettings(state.defaultBackSettings);
@@ -683,7 +693,13 @@ state.defaultBackSettings=normalizeBackSettings({...state.defaultBackSettings,no
     c.backSettings=normalizeBackSettings({...c.backSettings,nomSubRate:5});
   }
 });
- state.cashFlows=Array.isArray(state.cashFlows)?state.cashFlows:[]; state.closings=Array.isArray(state.closings)?state.closings:[]; state.businessSheets=Array.isArray(state.businessSheets)?state.businessSheets:[]; state.orderDeleteLogs=Array.isArray(state.orderDeleteLogs)?state.orderDeleteLogs:[]; state.unpaids=Array.isArray(state.unpaids)?state.unpaids:[]; state.backups=Array.isArray(state.backups)?state.backups:[]; state.manualClosingSheets=Array.isArray(state.manualClosingSheets)?state.manualClosingSheets:[]; state.manualClosingDaySheets=Array.isArray(state.manualClosingDaySheets)?state.manualClosingDaySheets:[];
+ state.cashFlows=Array.isArray(state.cashFlows)?state.cashFlows:[]; state.closings=Array.isArray(state.closings)?state.closings:[]; state.businessSheets=Array.isArray(state.businessSheets)?state.businessSheets:[]; state.orderDeleteLogs=Array.isArray(state.orderDeleteLogs)?state.orderDeleteLogs:[]; state.unpaids=Array.isArray(state.unpaids)?state.unpaids:[]; state.backups=Array.isArray(state.backups)?state.backups:[]; state.visitorEntries=Array.isArray(state.visitorEntries)?state.visitorEntries:[]; state.receiptEditAudit=Array.isArray(state.receiptEditAudit)?state.receiptEditAudit:[];
+if(!state.visitorEntriesMigrated){
+  const existingIds=new Set(state.visitorEntries.map(v=>v.saleId).filter(Boolean));
+  (state.sales||[]).forEach(sale=>{if(!existingIds.has(sale.id))state.visitorEntries.push({id:uuid(),saleId:sale.id,businessDate:sale.businessDate,tableId:sale.table?.id||'-',guests:Number(sale.table?.guests||0),startedAt:sale.table?.startedAt||sale.checkoutAt,createdAt:sale.checkoutAt||new Date().toISOString(),migrated:true})});
+  state.visitorEntriesMigrated=true;
+}
+state.manualClosingSheets=Array.isArray(state.manualClosingSheets)?state.manualClosingSheets:[]; state.manualClosingDaySheets=Array.isArray(state.manualClosingDaySheets)?state.manualClosingDaySheets:[];
 // 起動時点で古い巨大バックアップ履歴を軽量化（売上・キャスト・締め票は消さない）
 state.backups=(Array.isArray(state.backups)?state.backups:[]).slice(0,20).map(b=>({id:(b&&b.id)||uuid(),businessDate:(b&&b.businessDate)||state.businessDate,createdAt:(b&&b.createdAt)||new Date().toISOString(),reason:(b&&b.reason)||'auto'}));
 
@@ -704,9 +720,24 @@ state.casts=(state.casts||[]).map(c=>{let useDefaultBack=c.useDefaultBack!==fals
 repairActiveTableTimes();
 repairAllExtensionDurations();
 let appUnlocked = sessionStorage.getItem('lounge_pos_app_unlocked') === '1';
-let isAdmin = sessionStorage.getItem('lounge_pos_role') === 'admin';
+let currentRole = sessionStorage.getItem('lounge_pos_role') || 'general';
+let isAdmin = currentRole === 'admin';
+let isViewer = currentRole === 'viewer';
 function requireAdmin(){if(isAdmin)return true;alert('管理者権限が必要です');return false;}
-function applyAdminVisibility(){document.querySelectorAll('.admin-only').forEach(el=>{el.style.display=isAdmin?'':'none';});if(!isAdmin&&(document.getElementById('settings')?.classList.contains('active')||document.getElementById('cloud')?.classList.contains('active')))openScreen('tables');}
+function applyAdminVisibility(){document.querySelectorAll('.admin-only').forEach(el=>{el.style.display=isAdmin?'':'none';});document.querySelectorAll('.privileged-only').forEach(el=>{el.style.display=(isAdmin||isViewer)?'':'none';});if(!isAdmin&&(document.getElementById('settings')?.classList.contains('active')||document.getElementById('cloud')?.classList.contains('active')))openScreen('tables');if(!(isAdmin||isViewer)&&document.getElementById('overview')?.classList.contains('active'))openScreen('tables');}
+function applyViewerVisibility(){
+  document.body.classList.toggle('viewer-mode',isViewer);
+  if(!isViewer)return;
+  ['casts','backup','cloud','settings'].forEach(id=>document.querySelectorAll(`[data-screen="${id}"]`).forEach(el=>el.classList.add('viewer-hidden')));
+  document.querySelectorAll('.screen button').forEach(el=>el.classList.add('viewer-hidden'));
+  const allowed=['openHistoryPanel','makeClosing','makeMonthly','makeWeek','makeMonthSheet'];
+  document.querySelectorAll('#manage button').forEach(el=>{const oc=el.getAttribute('onclick')||'';if(allowed.some(x=>oc.startsWith(x+'(')))el.classList.remove('viewer-hidden');});
+  document.querySelectorAll('.screen input,.screen select,.screen textarea').forEach(el=>el.disabled=true);
+  ['weekCast','weekDate'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
+  document.querySelectorAll('.tabs button,.mobile-bottom-nav button').forEach(el=>{if(['tables','overview','manage'].includes(el.dataset.screen))el.classList.remove('viewer-hidden');});
+  const activeScreen=document.querySelector('.screen.active')?.id;
+  if(!['tables','overview','manage'].includes(activeScreen))openScreen('tables');
+}
 function applyAppLock(){
   const lock = document.getElementById('appLock');
   const app = document.querySelector('.app');
@@ -714,6 +745,7 @@ function applyAppLock(){
     lock.style.display='none';
     app.classList.remove('locked');
     applyAdminVisibility();
+    applyViewerVisibility();
   }else{
     lock.style.display='flex';
     app.classList.add('locked');
@@ -722,12 +754,15 @@ function applyAppLock(){
 }
 function unlockApp(){
   const v = document.getElementById('appPassInput').value;
-  if(v === PASS || v === ADMIN_PASS){
+  if(v === PASS || v === ADMIN_PASS || v === VIEWER_PASS){
     appUnlocked = true;
-    isAdmin = v === ADMIN_PASS;
+    currentRole = v === ADMIN_PASS ? 'admin' : (v === VIEWER_PASS ? 'viewer' : 'general');
+    isAdmin = currentRole === 'admin';
+    isViewer = currentRole === 'viewer';
     sessionStorage.setItem('lounge_pos_app_unlocked','1');
-    sessionStorage.setItem('lounge_pos_role',isAdmin?'admin':'general');
+    sessionStorage.setItem('lounge_pos_role',currentRole);
     applyAppLock();
+    if(isViewer)openScreen('tables');
   }else{
     document.getElementById('appPassError').textContent='パスワードが違います';
   }
@@ -762,6 +797,7 @@ function emergencyShrinkForStorage(){
   state.backups=[];
 }
 function save(){
+  if(isViewer)return;
   state.businessStatus=state.businessOpen?'open':'closed';
   let savedJson='';
   try{
@@ -784,7 +820,7 @@ function save(){
 
 
 
-let autoSyncTimer=null, autoSyncPollTimer=null, autoSyncBusy=false, applyingRemoteState=false;
+let autoSyncTimer=null, autoSyncPollTimer=null, autoSyncBusy=false, applyingRemoteState=false, pendingAutoSave=null;
 let lastLocalStateJson='', lastRemoteUpdatedAt=0, lastRemoteSignature='';
 function cloudConfigReady(cfg=getCloudConfig()){return !!(normalizeCloudUrl(cfg.dbUrl)&&normalizeCloudPath(cfg.path))}
 function simpleHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(36)+':'+str.length}
@@ -803,8 +839,9 @@ function scheduleAutoCloudSave(json=''){
   autoSyncTimer=setTimeout(()=>autoCloudSave(current,sig),700);
 }
 async function autoCloudSave(json,sig){
-  if(autoSyncBusy||applyingRemoteState||!isAutoSyncEnabled())return;
+  if(applyingRemoteState||!isAutoSyncEnabled())return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
+  if(autoSyncBusy){pendingAutoSave={json,sig};return}
   autoSyncBusy=true;
   try{
     const payload=cloudStatePayload(cfg);
@@ -815,7 +852,10 @@ async function autoCloudSave(json,sig){
     lastLocalStateJson=payload.stateSignature; lastRemoteSignature=payload.stateSignature; lastRemoteUpdatedAt=payload.syncRevision;
     localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},cfg,{lastSyncAt:Date.now(),lastAction:'auto-save'})));
     setCloudStatus('自動同期中\n最終送信: '+new Date().toLocaleString()+'\n端末: '+(cfg.device||'-'));
-  }catch(e){setCloudStatus('自動同期エラー: '+(e.message||e),true)}finally{autoSyncBusy=false}
+  }catch(e){setCloudStatus('自動同期エラー: '+(e.message||e),true)}finally{
+    autoSyncBusy=false;
+    if(pendingAutoSave){const next=pendingAutoSave;pendingAutoSave=null;setTimeout(()=>autoCloudSave(next.json,next.sig),100)}
+  }
 }
 async function pollCloudChanges(){
   if(autoSyncBusy||applyingRemoteState||!isAutoSyncEnabled()||document.hidden)return;
@@ -824,14 +864,14 @@ async function pollCloudChanges(){
   try{
     const res=await fetch(buildCloudEndpoint(cfg),{method:'GET',cache:'no-store'});
     const text=await res.text(); if(!res.ok)throw new Error('自動読込失敗 HTTP '+res.status+' '+text);
-    const data=text?JSON.parse(text):null; const nextState=data&&(data.state||data.data); if(!nextState)return;
+    const data=text?JSON.parse(text):null; const nextState=data&&(data.state||data.data);
+    if(!nextState){scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));return}
     const remoteTs=Number(data.syncRevision||Date.parse(data.updatedAt)||0);
     const remoteSig=data.stateSignature||simpleHash(JSON.stringify(nextState));
     const localSig=simpleHash(JSON.stringify(stateForLocalStorage()));
     if(remoteSig===localSig){lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);return}
     if(data.device===(cfg.device||'unknown-device')&&remoteSig===lastRemoteSignature)return;
     if(remoteTs && remoteTs<=lastRemoteUpdatedAt)return;
-    applyingRemoteState=true;
     applyingRemoteState=true;
     state=normalizeRestoreDataForLocalStorage(nextState);
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
@@ -893,13 +933,13 @@ function renderCloudSync(){
   updateAutoSyncButton();
 }
 function saveCloudConfig(){
-  const cfg={
+  const cfg=Object.assign({},getCloudConfig(),{
     dbUrl:normalizeCloudUrl(document.getElementById('cloudDbUrl')?.value||''),
     path:normalizeCloudPath(document.getElementById('cloudPath')?.value||'blow2nd/main'),
     auth:document.getElementById('cloudAuth')?.value||'',
     device:document.getElementById('cloudDevice')?.value||'unknown-device'
-  };
-  localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},getCloudConfig(),cfg)));
+  });
+  localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
   setCloudStatus('同期設定を保存しました。');
   return cfg;
 }
@@ -920,7 +960,7 @@ function cloudStatePayload(cfg){
     data:cleanState
   };
 }
-async function cloudSave(){
+async function cloudSave(){if(isViewer){alert('社長閲覧モードでは保存できません');return;}
   const cfg=saveCloudConfig();
   try{
     save();
@@ -952,6 +992,7 @@ async function cloudLoad(){
     const info='更新: '+(data.updatedAt?new Date(data.updatedAt).toLocaleString():'不明')+'\n端末: '+(data.device||'不明')+'\n営業日: '+(data.businessDate||nextState.businessDate||'-');
     if(!confirm('クラウドデータでこの端末のPOSを上書きします。\n\n'+info+'\n\n先にローカルバックアップを作成して続行しますか？')){setCloudStatus('読込をキャンセルしました。');return;}
     createAutoBackup('クラウド読込前退避');
+    applyingRemoteState=true;
     state=normalizeRestoreDataForLocalStorage(nextState);
     repairActiveTableTimes();
     repairAllExtensionDurations();
@@ -964,7 +1005,7 @@ async function cloudLoad(){
     localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},cfg,{lastSyncAt:Date.now(),lastAction:'load'})));
     setCloudStatus('クラウド読込完了。\n'+info);
     render();
-  }catch(e){setCloudStatus('クラウド読込エラー: '+(e.message||e),true)}
+  }catch(e){applyingRemoteState=false;setCloudStatus('クラウド読込エラー: '+(e.message||e),true)}
 }
 async function cloudCheck(){
   const cfg=saveCloudConfig();
@@ -1243,12 +1284,32 @@ function cname(id){return state.casts.find(c=>c.id===id)?.name||'不明'}
 function isCastHidden(c){return !!c.hidden}
 function activeCasts(){return (state.casts||[]).filter(c=>!isCastHidden(c))}
 function hiddenCasts(){return (state.casts||[]).filter(c=>isCastHidden(c))}
-function openScreen(id){if((id==='settings'||id==='cloud')&&!isAdmin)return false;document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));let el=document.getElementById(id);if(el)el.classList.add('active');document.querySelectorAll('.tab,.mobile-bottom-nav button').forEach(x=>x.classList.toggle('active',x.dataset.screen===id));render()}
+function openScreen(id){if(isViewer&&!['tables','overview','manage'].includes(id))return false;if(id==='overview'&&!(isAdmin||isViewer))return false;if((id==='settings'||id==='cloud')&&!isAdmin)return false;document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));let el=document.getElementById(id);if(el)el.classList.add('active');document.querySelectorAll('.tab,.mobile-bottom-nav button').forEach(x=>x.classList.toggle('active',x.dataset.screen===id));render()}
 function needPass(id){target=id;passInput.value='';openModal('passModal')}
 function unlock(){if(passInput.value===PASS){closeModal('passModal');openScreen(target)}else alert('違います')}
 function openModal(id){document.getElementById(id).classList.add('show')}function closeModal(id){document.getElementById(id).classList.remove('show')}
-function render(){save();nowLabel.textContent=`営業日 ${state.businessDate} / ${state.businessOpen?'営業中':'営業終了済'} / 現在 ${time(now)}`;renderTop();renderTables();renderCasts();renderManage();renderHistory();renderSettings();if(document.getElementById('backup')?.classList.contains('active'))renderBackupScreen();if(document.getElementById('cloud')?.classList.contains('active'))renderCloudSync();updateBackupStatus()}
+function render(){save();nowLabel.textContent=`営業日 ${state.businessDate} / ${state.businessOpen?'営業中':'営業終了済'} / 現在 ${time(now)}`;renderTop();renderTables();renderOverview();renderCasts();renderManage();renderVisitorCounts();renderHistory();renderSettings();renderReceiptAuditPanel();updateReceiptGrantStatus();if(document.getElementById('backup')?.classList.contains('active'))renderBackupScreen();if(document.getElementById('cloud')?.classList.contains('active'))renderCloudSync();updateBackupStatus();applyViewerVisibility()}
 function renderTop(){let sales=state.sales.filter(s=>s.businessDate===state.businessDate).reduce((a,s)=>a+saleBaseAmount(s),0), run=state.tables.filter(t=>t.status==='busy').reduce((a,t)=>a+checkoutBaseAmount(t,now),0);salesTop.textContent=yen(sales);runTop.textContent=yen(run)}
+
+function renderOverview(){
+  const area=document.getElementById('overviewArea');
+  if(!area)return;
+  if(!(isAdmin||isViewer)){area.innerHTML='';return;}
+  const busy=(state.tables||[]).filter(t=>t.status==='busy');
+  const empty=(state.tables||[]).filter(t=>t.status!=='busy');
+  const daySales=(state.sales||[]).filter(s=>s.businessDate===state.businessDate);
+  const paidTotal=daySales.reduce((a,s)=>a+saleBaseAmount(s),0);
+  const runningTotal=busy.reduce((a,t)=>a+checkoutBaseAmount(t,now),0);
+  const guests=busy.reduce((a,t)=>a+(Number(t.guests)||0),0);
+  const tableRows=(state.tables||[]).map(t=>{
+    const c=t.status==='busy'?calc(t,now):null;
+    const names=[...(t.nominations||[]),...(t.dohan||[]),...(t.jounai||[]),...(t.after||[])].filter((v,i,a)=>a.indexOf(v)===i).map(cname).join('、')||'-';
+    return `<tr><td><b>${esc(t.id)}</b></td><td>${t.status==='busy'?'<span class="badge ok">稼働中</span>':'<span class="badge">空席</span>'}</td><td>${t.status==='busy'?(t.guests||0)+'名':'-'}</td><td>${t.startedAt?time(new Date(t.startedAt)):'-'}</td><td>${t.status==='busy'?mins(t.startedAt,now)+'分 / 残り'+remain(t,now)+'分':'-'}</td><td>${t.status==='busy'?(t.payment==='card'?'カード':'現金'):'-'}</td><td>${names}</td><td class="right">${c?yen(c.total):'-'}</td></tr>`;
+  }).join('');
+  const saleRows=daySales.slice().sort((a,b)=>new Date(b.checkoutAt)-new Date(a.checkoutAt)).map(s=>`<tr><td>${time(new Date(s.checkoutAt))}</td><td>${esc(s.table?.id||'-')}</td><td>${s.table?.guests||0}名</td><td>${s.paymentLabel||paymentModeLabel(s.paymentMode||s.table?.payment||'cash')}</td><td class="right">${yen(s.subtotal||0)}</td><td class="right">${yen(s.total||0)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">本日の会計はまだありません</td></tr>';
+  const castRows=(state.casts||[]).filter(c=>!c.hidden).map(c=>{const l=(c.logs||{})[state.businessDate]||{};let st=l.in&&!l.out?'出勤中':l.in&&l.out?'退勤済':'未出勤';return `<tr><td>${esc(c.name)}</td><td>${st}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td class="right">${yen(timePay(c,state.businessDate))}</td><td class="right">${yen(stats(c.id,state.businessDate).back)}</td></tr>`}).join('')||'<tr><td colspan="6" class="muted">キャスト未登録</td></tr>';
+  area.innerHTML=`<div class="summary">${cardStatText('稼働卓',busy.length+' / '+state.tables.length)}${cardStatCount('空席',empty.length,'卓')}${cardStatCount('現在客数',guests,'名')}${cardStat('会計済売上',paidTotal)}${cardStat('稼働見込',runningTotal)}${cardStat('合計見込',paidTotal+runningTotal)}</div><div class="card" style="margin-top:12px"><h3>全卓状況</h3><div class="scroll"><table><thead><tr><th>卓</th><th>状態</th><th>人数</th><th>開始</th><th>経過 / 残り</th><th>支払</th><th>担当キャスト</th><th class="right">現在金額</th></tr></thead><tbody>${tableRows}</tbody></table></div></div><div class="grid2" style="margin-top:12px"><div class="card"><h3>本日の会計</h3><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th>人数</th><th>支払</th><th class="right">小計</th><th class="right">合計</th></tr></thead><tbody>${saleRows}</tbody></table></div></div><div class="card"><h3>キャスト出勤状況</h3><div class="scroll"><table><thead><tr><th>キャスト</th><th>状態</th><th>出勤</th><th>退勤</th><th class="right">時間給</th><th class="right">バック</th></tr></thead><tbody>${castRows}</tbody></table></div></div></div>`;
+}
 
 function addDaysStr(d,days){let x=new Date(d+'T00:00:00');x.setDate(x.getDate()+days);return dateKey(x)}
 function nextBusinessDate(){
@@ -1422,7 +1483,7 @@ function confirmStartBusinessDay(){
 function renderTables(){
   function tableCard(t){
     let c=calc(t,now);
-    return `<div class="card" onclick="active='${t.id}';renderTables()"><div class="row"><div class="table-name">${t.id}</div><span class="${timeBadge(t,now)}">${t.status==='busy'?'残り'+remain(t,now)+'分':'空席'}</span></div><div class="grid2" style="margin:10px 0"><div class="info"><b>人数</b><span>${t.guests}名</span></div><div class="info"><b>時間</b><span>${t.startedAt?mins(t.startedAt,now)+'分 / 残り'+remain(t,now)+'分':'-'}</span></div><div class="info"><b>支払</b><span>${t.payment==='card'?'カード':'現金'}</span></div><div class="info"><b>金額</b><span>${t.status==='busy'?yen(c.total):'-'}</span></div></div>${t.status==='busy'?`<button class="btn out" onclick="event.stopPropagation();openCheckout('${t.id}')">会計</button>`:`<button class="btn" onclick="event.stopPropagation();openStart('${t.id}')">入卓</button>`}</div>`;
+    return `<div class="card" ${isViewer?'':`onclick="active='${t.id}';renderTables()"`}><div class="row"><div class="table-name">${t.id}</div><span class="${timeBadge(t,now)}">${t.status==='busy'?'残り'+remain(t,now)+'分':'空席'}</span></div><div class="grid2" style="margin:10px 0"><div class="info"><b>人数</b><span>${t.guests}名</span></div><div class="info"><b>時間</b><span>${t.startedAt?mins(t.startedAt,now)+'分 / 残り'+remain(t,now)+'分':'-'}</span></div><div class="info"><b>支払</b><span>${t.payment==='card'?'カード':'現金'}</span></div><div class="info"><b>金額</b><span>${t.status==='busy'?yen(c.total):'-'}</span></div></div>${isViewer?'<div class="muted" style="font-weight:800">閲覧のみ</div>':(t.status==='busy'?`<button class="btn out" onclick="event.stopPropagation();openCheckout('${t.id}')">会計</button>`:`<button class="btn" onclick="event.stopPropagation();openStart('${t.id}')">入卓</button>`)}</div>`;
   }
   const cTables=state.tables.filter(t=>String(t.id).startsWith('C'));
   const aTables=state.tables.filter(t=>String(t.id).startsWith('A'));
@@ -1685,7 +1746,7 @@ function printReceipt(id){
   w.document.open();w.document.write(html);w.document.close();w.focus();
   setTimeout(()=>{receiptPrintingLock=false;if(btn){btn.disabled=false;btn.textContent=oldText;}},3000);
 }
-function updateTable(id,p){state.tables=state.tables.map(t=>t.id===id?{...t,...p}:t);render()}
+function updateTable(id,p){if(isViewer)return;state.tables=state.tables.map(t=>{if(t.id!==id)return t;if(Object.prototype.hasOwnProperty.call(p,'guests'))syncVisitorGuests(t,p.guests);return {...t,...p}});render()}
 function updateTableSetPriceInline(id,value){
   const table=state.tables.find(t=>t.id===id);
   if(!table)return;
@@ -1695,9 +1756,9 @@ function updateTableSetPriceInline(id,value){
   render();
 }
 
-function openStart(id){startId=id;startTitle.textContent=id+' 入卓設定';setTimeInput('stTime',businessTime10(now,state.businessDate,'ceil',26),25);stGuests.value=1;stPay.value='cash';stNote.value='';['stNom','stDohan','stJounai','stAfter'].forEach(x=>document.getElementById(x).innerHTML=activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>');openModal('startModal')}
+function openStart(id){if(isViewer)return;startId=id;startTitle.textContent=id+' 入卓設定';setTimeInput('stTime',businessTime10(now,state.businessDate,'ceil',26),25);stGuests.value=1;stPay.value='cash';stNote.value='';['stNom','stDohan','stJounai','stAfter'].forEach(x=>document.getElementById(x).innerHTML=activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>');openModal('startModal')}
 function ids(id){return[...document.getElementById(id).querySelectorAll('button.ok')].map(b=>b.dataset.id)}
-function startConfirm(){let stJ=ids('stJounai'),jc={};stJ.forEach(cid=>jc[cid]=1);state.tables=state.tables.map(t=>t.id===startId?{...emptyTable(t.id),status:'busy',startedAt:parseBusinessDT(state.businessDate,stTime.value).toISOString(),serviceMinutes:BASIC_SET_MIN,guests:+stGuests.value||1,payment:stPay.value,note:stNote.value,nominations:ids('stNom'),dohan:ids('stDohan'),jounai:stJ,jounaiCounts:jc,after:ids('stAfter')}:t);closeModal('startModal');render()}
+function startConfirm(){if(isViewer)return;let stJ=ids('stJounai'),jc={};stJ.forEach(cid=>jc[cid]=1);let made=null;state.tables=state.tables.map(t=>{if(t.id!==startId)return t;made={...emptyTable(t.id),status:'busy',startedAt:parseBusinessDT(state.businessDate,stTime.value).toISOString(),serviceMinutes:BASIC_SET_MIN,guests:+stGuests.value||1,payment:stPay.value,note:stNote.value,nominations:ids('stNom'),dohan:ids('stDohan'),jounai:stJ,jounaiCounts:jc,after:ids('stAfter')};recordVisitorStart(made);return made});closeModal('startModal');render()}
 
 function localDateValue(d){let y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`}
 function openTimeEdit(id){
@@ -1946,7 +2007,7 @@ function calcCheckoutPayment(t,mode,cashPaid=0,cashReceivedValue=0,end=now){
   return {...c, baseTotal:base, prepaidBase, prepaidCash, prepaidCard, prepaidCardFee:prepaidFee, prepaidCardCharge:prepaidCharge, remainingBase, paymentMode:mode, cashPaid, cashReceived, cashChange, cardBase, cardFee, cardCharge, card:cardFee, checkoutDue:finalDue, total:prepaidCash+prepaidCharge+finalDue};
 }
 function paymentModeLabel(mode){return mode==='card'?'カード':mode==='mixed'?'現金＋カード':mode==='unpaid'?'未収':'現金'}
-function openCheckout(id){
+function openCheckout(id){if(isViewer)return;
   checkoutTarget=id;
   let t=state.tables.find(x=>x.id===id);
   if(!t||t.status!=='busy')return;
@@ -2090,30 +2151,80 @@ function syncDerivedAfterReceiptEdit(d){
     close.editedAt=new Date().toISOString();
   });
 }
+function currentDeviceName(){return (getCloudConfig()?.device||localStorage.getItem('blow_device_name')||'この端末').trim()||'この端末'}
+function receiptGrantActive(){
+  if(isAdmin)return true;
+  receiptEditUnlocked=receiptEditGrantUntil>Date.now();
+  if(!receiptEditUnlocked){receiptEditGrantUntil=0;sessionStorage.removeItem('lounge_pos_receipt_edit_until');}
+  return receiptEditUnlocked;
+}
+function updateReceiptGrantStatus(){
+  const el=document.getElementById('receiptGrantStatus');if(!el)return;
+  if(isAdmin){el.style.display='';el.textContent='伝票修正：常時許可';return;}
+  if(receiptGrantActive()){const sec=Math.max(0,Math.ceil((receiptEditGrantUntil-Date.now())/1000));el.style.display='';el.textContent=`修正権限 残り ${String(Math.floor(sec/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`;}
+  else el.style.display='none';
+}
+function generateReceiptEditOtp(){
+  if(!requireAdmin())return;
+  const code=String(Math.floor(100000+Math.random()*900000));
+  const nowIso=new Date().toISOString(),expiresAt=new Date(Date.now()+RECEIPT_GRANT_MS).toISOString();
+  state.receiptEditOtp={code,createdAt:nowIso,expiresAt,usedAt:null,usedBy:null,issuedBy:'admin'};
+  state.receiptEditAudit.unshift({id:uuid(),type:'grant-issued',createdAt:nowIso,actor:'こうせい（管理者）',device:currentDeviceName(),summary:`修正用コード ${code} を発行（30分有効・1回限り）`});
+  save();renderReceiptAuditPanel();
+  alert(`修正用ワンタイムコード：${code}\n有効期限：${new Date(expiresAt).toLocaleTimeString()}\n1回使用すると失効します。`);
+}
+function saleAuditView(sale){
+  const t=sale?.table||{}, c=sale||{};
+  const ops={指名:(t.nominations||[]).map(cname),場内:(t.jounai||[]).map(cname),同伴:(t.dohan||[]).map(cname),アフター:(t.after||[]).map(cname)};
+  const items=(t.items||[]).map(i=>`${i.name}${i.castId?'('+cname(i.castId)+')':''} ×${i.qty||1} @${i.price||0}`);
+  return {人数:t.guests||0,セット単価:baseSeatUnit(t),指名単価:Number(t.nominationUnitPrice??2000),支払:c.paymentLabel||paymentModeLabel(c.paymentMode||t.payment||'cash'),預かり:Number(c.cashReceived||0),小計:Number(c.subtotal||0),合計:Number(c.total||0),指名等:ops,明細:items};
+}
+function auditDiff(before,after){
+  const lines=[]; for(const k of Object.keys({...before,...after})){
+    const a=JSON.stringify(before[k]),b=JSON.stringify(after[k]);if(a!==b)lines.push(`${k}: ${typeof before[k]==='object'?a:before[k]} → ${typeof after[k]==='object'?b:after[k]}`);
+  } return lines.join('\n')||'変更なし';
+}
+function logReceiptMutation(sale,before,action){
+  const after=saleAuditView(sale),diff=auditDiff(before,after);if(diff==='変更なし')return;
+  state.receiptEditAudit.unshift({id:uuid(),type:'receipt-edit',createdAt:new Date().toISOString(),actor:isAdmin?'こうせい（管理者）':'一時修正権限',device:currentDeviceName(),saleId:sale.id,businessDate:sale.businessDate,tableId:sale.table?.id||'-',action,summary:`${sale.businessDate} ${sale.table?.id||'-'}伝票を修正`,diff,before,after});
+  state.receiptEditAudit=state.receiptEditAudit.slice(0,500);
+}
+function renderReceiptAuditPanel(force=false){
+  const box=document.getElementById('receiptAuditArea');if(!box||!isAdmin)return;
+  if(force)box.style.display=box.style.display==='none'?'block':'none';
+  const rows=(state.receiptEditAudit||[]).slice(0,100).map(x=>`<tr><td>${new Date(x.createdAt).toLocaleString()}</td><td>${esc(x.actor||'-')}</td><td>${esc(x.device||'-')}</td><td>${esc(x.summary||'-')}</td><td class="log-diff">${esc(x.diff||'')}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">修正ログなし</td></tr>';
+  box.innerHTML=`<div class="card"><div class="row"><h3>伝票修正ログ（こうせい専用）</h3><button class="btn out small" onclick="receiptAuditArea.style.display='none'">閉じる</button></div><p class="muted">コード発行・利用端末・伝票の修正前→修正後を記録します。</p><div class="scroll"><table><thead><tr><th>日時</th><th>操作者</th><th>端末</th><th>対象</th><th>修正内容</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function visitorEntryForTable(t){return (state.visitorEntries||[]).find(v=>v.id===t?.visitorEntryId)}
+function recordVisitorStart(t){
+  const rec={id:uuid(),businessDate:state.businessDate,tableId:t.id,guests:Number(t.guests||1),startedAt:t.startedAt||new Date().toISOString(),createdAt:new Date().toISOString()};
+  state.visitorEntries.push(rec);t.visitorEntryId=rec.id;
+}
+function syncVisitorGuests(t,newGuests){const rec=visitorEntryForTable(t);if(rec)rec.guests=Math.max(1,Number(newGuests)||1)}
+function visitorCountForDate(d){return (state.visitorEntries||[]).filter(v=>v.businessDate===d).reduce((a,v)=>a+Number(v.guests||0),0)}
+function renderVisitorCounts(){
+  const box=document.getElementById('visitorCountArea');if(!box)return;
+  const ym=state.businessDate.slice(0,7),today=visitorCountForDate(state.businessDate);
+  const month=(state.visitorEntries||[]).filter(v=>String(v.businessDate||'').startsWith(ym)).reduce((a,v)=>a+Number(v.guests||0),0);
+  const months={};(state.visitorEntries||[]).forEach(v=>{const m=String(v.businessDate||'').slice(0,7);if(m)months[m]=(months[m]||0)+Number(v.guests||0)});
+  const rows=Object.entries(months).sort((a,b)=>b[0].localeCompare(a[0])).map(([m,n])=>`<tr><td>${m}</td><td class="right">${n}人</td></tr>`).join('')||'<tr><td colspan="2" class="muted">入客記録なし</td></tr>';
+  box.innerHTML=`<div class="card"><div class="row"><h3>入客人数</h3><span class="muted">卓数ではなく実人数</span></div><div class="summary">${cardStat('本日',today)}${cardStat(ym+' 月間',month)}</div><div class="scroll" style="margin-top:10px"><table><thead><tr><th>月</th><th class="right">入客人数</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
 function requireReceiptEditAccess(next){
-  if(receiptEditUnlocked){next();return;}
-  receiptEditPending=next;
-  receiptEditPassInput.value='';
-  receiptEditPassError.textContent='';
-  openModal('receiptEditPassModal');
-  setTimeout(()=>receiptEditPassInput.focus(),50);
+  if(receiptGrantActive()){next();return;}
+  receiptEditPending=next;receiptEditPassInput.value='';receiptEditPassError.textContent='';openModal('receiptEditPassModal');setTimeout(()=>receiptEditPassInput.focus(),50);
 }
 function unlockReceiptEdit(){
-  if(receiptEditPassInput.value===PROFIT_PASS){
-    receiptEditUnlocked=true;
-    sessionStorage.setItem('lounge_pos_receipt_edit_unlocked','1');
-    closeModal('receiptEditPassModal');
-    const next=receiptEditPending;
-    receiptEditPending=null;
-    if(typeof next==='function')next();
-  }else{
-    receiptEditPassError.textContent='パスワードが違います';
-  }
+  const otp=state.receiptEditOtp,code=receiptEditPassInput.value.trim();
+  if(!otp||otp.code!==code){receiptEditPassError.textContent='コードが違います';return;}
+  if(otp.usedAt){receiptEditPassError.textContent='このコードは使用済みです';return;}
+  if(new Date(otp.expiresAt).getTime()<=Date.now()){receiptEditPassError.textContent='コードの有効期限が切れています';return;}
+  receiptEditGrantUntil=Date.now()+RECEIPT_GRANT_MS;receiptEditUnlocked=true;sessionStorage.setItem('lounge_pos_receipt_edit_until',String(receiptEditGrantUntil));
+  otp.usedAt=new Date().toISOString();otp.usedBy=currentDeviceName();
+  state.receiptEditAudit.unshift({id:uuid(),type:'grant-used',createdAt:otp.usedAt,actor:'一時修正権限',device:otp.usedBy,summary:'修正用コードを使用し、この端末へ30分間の伝票修正権限を付与'});
+  save();closeModal('receiptEditPassModal');updateReceiptGrantStatus();const next=receiptEditPending;receiptEditPending=null;if(typeof next==='function')next();
 }
-function lockReceiptEdit(){
-  receiptEditUnlocked=false;
-  sessionStorage.removeItem('lounge_pos_receipt_edit_unlocked');
-}
+function lockReceiptEdit(){receiptEditUnlocked=false;receiptEditGrantUntil=0;sessionStorage.removeItem('lounge_pos_receipt_edit_until');updateReceiptGrantStatus();}
 function recalcPastSale(sale){
   if(!sale||!sale.table)return;
   let end=new Date(sale.checkoutAt||new Date());
@@ -2133,7 +2244,7 @@ function pastReceiptCastOptions(selected=''){
   return `<option value="__guest__" ${selected==='__guest__'?'selected':''}>ゲスト</option>`+castOptions;
 }
 function editPastReceipt(saleId){
-  if(!requireAdmin()) return;
+  if(isViewer)return;
   if(!receiptEditUnlocked){requireReceiptEditAccess(()=>editPastReceipt(saleId));return;}
   let sale=state.sales.find(s=>s.id===saleId);
   if(!sale||!sale.table)return alert('伝票が見つかりません');
@@ -2147,30 +2258,30 @@ function editPastReceipt(saleId){
   let itemRows=(t.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.castId?'（'+esc(cname(i.castId))+'）':((i.target==='guest'||i.type==='guestShot')?'（ゲスト）':'')}</td><td class="right">${yen(i.price)}</td><td class="right">${i.qty||1}</td><td class="right">${yen((+i.price||0)*(+i.qty||1))}</td><td><button class="btn small" onclick="pastChangeItemQty('${saleId}','${i.id}',1)">＋</button> <button class="btn out small" onclick="pastChangeItemQty('${saleId}','${i.id}',-1)">－</button> <button class="btn bad small" onclick="pastDeleteItemQty('${saleId}','${i.id}')">数量削除</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">追加注文なし</td></tr>';
   selectTitle.textContent=`過去伝票修正 ${t.id}`;
   let cashEdit=sale.table.payment==='cash'?`<div><label>預かり金</label><input type="number" value="${sale.cashReceived||0}" onchange="updatePastCashReceived('${saleId}',this.value)"></div><div class="info"><b>おつり</b><span>${yen(Math.max(0,(+sale.cashReceived||0)-(+c.total||0)))}</span></div>`:`<div class="info"><b>預かり金</b><span>現金会計のみ</span></div><div class="info"><b>おつり</b><span>-</span></div>`;
-  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正は3112で解除中です。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid2"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
+  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid2"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
   openModal('selectModal');
 }
 function updatePastBaseCharge(saleId,value){
   let sale=state.sales.find(s=>s.id===saleId);
   if(!sale||!sale.table)return;
-  sale.table.baseSeatUnitOverride=Math.max(0,Number(value)||0);
-  recalcPastSale(sale);
+  const before=saleAuditView(sale); sale.table.baseSeatUnitOverride=Math.max(0,Number(value)||0);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'セット料金変更');
   render();
   editPastReceipt(saleId);
 }
 function updatePastNominationCharge(saleId,value){
   let sale=state.sales.find(s=>s.id===saleId);
   if(!sale||!sale.table)return;
-  sale.table.nominationUnitPrice=Math.max(0,Number(value)||0);
-  recalcPastSale(sale);
+  const before=saleAuditView(sale); sale.table.nominationUnitPrice=Math.max(0,Number(value)||0);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'指名料金変更');
   render();
   editPastReceipt(saleId);
 }
 function updatePastCashReceived(saleId,value){
   let sale=state.sales.find(s=>s.id===saleId);
   if(!sale)return;
-  sale.cashReceived=Math.max(0,Number(value)||0);
-  recalcPastSale(sale);
+  const before=saleAuditView(sale); sale.cashReceived=Math.max(0,Number(value)||0);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'預かり金変更');
   render();
   editPastReceipt(saleId);
 }
@@ -2179,20 +2290,20 @@ function pastAddQty(){return Math.max(1,Math.floor(+document.getElementById('pas
 function pastAddOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
   if(!sale||!cid)return alert('キャストを選択してください');
-  sale.table[key]=sale.table[key]||[];
+  const before=saleAuditView(sale); sale.table[key]=sale.table[key]||[];
   for(let i=0;i<pastAddQty();i++) sale.table[key].push(cid);
-  recalcPastSale(sale); render(); editPastReceipt(saleId);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'指名等追加'); render(); editPastReceipt(saleId);
 }
 function pastRemoveOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
   if(!sale||!sale.table[key]||!sale.table[key].length)return;
-  let qty=pastAddQty();
+  const before=saleAuditView(sale); let qty=pastAddQty();
   for(let i=0;i<qty;i++){
     let idx=cid?sale.table[key].lastIndexOf(cid):-1;
     if(idx<0) idx=sale.table[key].length-1;
     if(idx>=0) sale.table[key].splice(idx,1);
   }
-  recalcPastSale(sale); render(); editPastReceipt(saleId);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'指名等削除'); render(); editPastReceipt(saleId);
 }
 function pastAddItem(saleId,type,name,price,needsCast){
   let sale=state.sales.find(s=>s.id===saleId);
@@ -2205,11 +2316,11 @@ function pastAddItem(saleId,type,name,price,needsCast){
   let finalPrice=+price||0;
   if(needsCast&&isGuest&&type==='drink'){finalName='ドリンク';}
   if(needsCast&&isGuest&&type==='castShot'){finalType='guestShot';finalName='ゲストショット';finalPrice=1000;}
-  sale.table.items=sale.table.items||[];
+  const before=saleAuditView(sale); sale.table.items=sale.table.items||[];
   let item={id:uuid(),type:finalType,name:finalName,price:finalPrice,qty,target:isGuest?'guest':(needsCast?'cast':'')};
   if(needsCast&&!isGuest)item.castId=selected;
   sale.table.items.push(item);
-  recalcPastSale(sale); render(); editPastReceipt(saleId);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'注文明細追加'); render(); editPastReceipt(saleId);
 }
 function pastAddCustomItem(saleId){
   let name=prompt('商品名を入力してください','その他');
@@ -2221,16 +2332,16 @@ function pastAddCustomItem(saleId){
 function pastChangeItemQty(saleId,itemId,delta){
   let sale=state.sales.find(s=>s.id===saleId); if(!sale)return;
   let item=(sale.table.items||[]).find(i=>i.id===itemId); if(!item)return;
-  let wasExtension=isExtensionItem(item);
+  const before=saleAuditView(sale); let wasExtension=isExtensionItem(item);
   item.qty=(+item.qty||1)+delta;
   if(item.qty<=0) sale.table.items=(sale.table.items||[]).filter(i=>i.id!==itemId);
   if(wasExtension) syncServiceMinutesFromExtensions(sale.table);
-  recalcPastSale(sale); render(); editPastReceipt(saleId);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'注文数量変更'); render(); editPastReceipt(saleId);
 }
 function pastDeleteItemQty(saleId,itemId){
   let sale=state.sales.find(s=>s.id===saleId); if(!sale)return;
   let item=(sale.table.items||[]).find(i=>i.id===itemId); if(!item)return;
-  let max=+item.qty||1,raw=prompt(`${item.name} を何個減らしますか？（1〜${max}）`,'1');
+  const before=saleAuditView(sale); let max=+item.qty||1,raw=prompt(`${item.name} を何個減らしますか？（1〜${max}）`,'1');
   if(raw===null)return;
   let qty=Math.floor(+raw||0);
   if(qty<1||qty>max)return alert('削除数が正しくありません');
@@ -2238,7 +2349,7 @@ function pastDeleteItemQty(saleId,itemId){
   item.qty=max-qty;
   if(item.qty<=0) sale.table.items=(sale.table.items||[]).filter(i=>i.id!==itemId);
   if(wasExtension) syncServiceMinutesFromExtensions(sale.table);
-  recalcPastSale(sale); render(); editPastReceipt(saleId);
+  recalcPastSale(sale); logReceiptMutation(sale,before,'注文数量削除'); render(); editPastReceipt(saleId);
 }
 
 const BACKUP_DB_NAME='Blow2ndPOSBackupDB';
@@ -3209,7 +3320,7 @@ function deleteManualClosingSheet(id){
 }
 
 function openReceiptEditPanel(){
-  if(!requireAdmin()) return;
+  if(isViewer)return;
   if(!receiptEditUnlocked){requireReceiptEditAccess(openReceiptEditPanel);return;}
   selectTitle.textContent='過去伝票修正';
   const rows=(state.sales||[]).slice().sort((a,b)=>new Date(b.checkoutAt)-new Date(a.checkoutAt)).map(s=>`<tr><td>${s.businessDate}</td><td>${time(new Date(s.checkoutAt))}</td><td>${s.table?.id||'-'}</td><td>${s.table?.guests||'-'}</td><td>${s.table?.payment==='card'?'カード':s.table?.payment==='unpaid'?'未収':'現金'}</td><td class="right">${yen(s.total)}</td><td><button class="btn blue small" onclick="editPastReceipt('${s.id}')">修正</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">修正できる伝票がありません</td></tr>';
@@ -3244,7 +3355,10 @@ function confirmMerge(){
   let target=state.tables.find(t=>t.id===checkoutTarget);
   let src=state.tables.find(t=>t.id===mergeSource.value);
   if(!target||!src||target.status!=='busy'||src.status!=='busy')return;
+  const targetVisit=visitorEntryForTable(target),srcVisit=visitorEntryForTable(src);
   target.guests=(target.guests||1)+(src.guests||1);
+  if(targetVisit){targetVisit.guests=target.guests;if(srcVisit)state.visitorEntries=state.visitorEntries.filter(v=>v.id!==srcVisit.id);}
+  else if(srcVisit){srcVisit.guests=target.guests;target.visitorEntryId=srcVisit.id;}
   target.startedAt=new Date(Math.min(new Date(target.startedAt),new Date(src.startedAt))).toISOString();
   target.nominations=uniq([...(target.nominations||[]),...(src.nominations||[])]);
   target.dohan=uniq([...(target.dohan||[]),...(src.dohan||[])]);
@@ -3322,6 +3436,9 @@ function runPosSelfTests(){
   console.assert(repairTest.serviceMinutes===120,'過去に削除済みの延長ズレも残存明細から再構築される');
   console.assert(Math.round(135000*0.1021)===13784,'控除率10.21%計算');
   console.assert(typeof openTimeEdit==='function','卓時間修正画面が存在する');
+  console.assert(VIEWER_PASS==='0120','社長閲覧パスワードは0120');
+  console.assert(typeof renderOverview==='function','社長・管理者用一覧画面が存在する');
+  console.assert(document.getElementById('overview'),'一覧画面セクションが存在する');
   console.assert(PROFIT_PASS==='3112','利益率パスワードは3112');
   console.assert(HISTORY_PASS==='3112','履歴パスワードは3112');
   console.assert(typeof deleteBusinessHistory==='function','営業日別履歴削除が存在する');
@@ -3340,7 +3457,7 @@ function runPosSelfTests(){
 
   console.assert(typeof deleteOrderItem==='function','注文の数量削除が存在する');
   console.assert(typeof editPastReceipt==='function','過去伝票修正が存在する');
-  console.assert(typeof openReceiptEditPanel==='function','伝票修正一覧が存在する');
+  console.assert(typeof openReceiptEditPanel==='function','伝票修正一覧が存在する');console.assert(typeof generateReceiptEditOtp==='function','30分ワンタイム修正権限発行が存在する');console.assert(typeof renderVisitorCounts==='function','入客人数月別集計が存在する');
   console.assert(typeof recalcPastSale==='function','過去伝票再計算が存在する');
   console.assert(typeof renderProfitRates==='function','利益率画面が存在する');
   console.assert(typeof syncDerivedAfterReceiptEdit==='function','過去伝票修正後の派生データ同期が存在する');
@@ -3376,7 +3493,7 @@ function runPosSelfTests(){
 }
 runPosSelfTests();
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
-setInterval(()=>{now=new Date();render()},30000);applyAppLock();initAllTimePickers();render();setTimeout(startAutoSync,800);
+setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();render();setTimeout(startAutoSync,800);
 
 
 console.assert(typeof openClosingSheetInput==='function','締め票入力画面が存在する');
