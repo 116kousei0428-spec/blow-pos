@@ -453,7 +453,7 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
     </div>
   </section>
 
-  <section id="settings" class="screen"><div class="card"><h2>店舗標準 給与・バック設定</h2><p class="muted">ここを変えると標準設定を使うキャスト、新規追加キャスト、給与計算・バック計算に反映します。</p><div class="grid4" id="defaultBackSettingsBox"></div></div><div class="card" style="margin-top:12px"><h2>シャンパン原価</h2><div class="scroll"><table><thead><tr><th>商品</th><th class="right">売価</th><th class="right">原価</th></tr></thead><tbody id="champRows"></tbody></table></div></div><div class="card" style="margin-top:12px;border-color:#fecaca"><h2 class="danger">初期化</h2><p class="muted">試運転データを消して、キャスト・卓・売上・履歴・仕入れ支出をすべて初期状態に戻します。</p><button class="btn bad" onclick="resetAllData()">全データ初期化</button>
+  <section id="settings" class="screen"><div class="card"><h2>店舗標準 給与・バック設定</h2><p class="muted">ここを変えると標準設定を使うキャスト、新規追加キャスト、給与計算・バック計算に反映します。</p><div class="grid4" id="defaultBackSettingsBox"></div></div><div class="card" style="margin-top:12px"><h2>シャンパン原価</h2><div class="scroll"><table><thead><tr><th>商品</th><th class="right">売価</th><th class="right">原価</th></tr></thead><tbody id="champRows"></tbody></table></div></div><div class="card admin-only" style="margin-top:12px;border-color:#fecaca"><h2 class="danger">スターター</h2><p class="muted">Firebaseの同期リンク・保存パス・自動同期設定とキャスト登録／単価設定を残し、過去の会計・卓・入客数・締め票・出退勤・監査ログなどの営業データだけを消します。今日から新規運用を始める時に一度だけ実行してください。</p><button class="btn bad" onclick="starterReset()">スターター</button>
 <button class="btn out" onclick="document.getElementById('settingRestoreFile').click()">バックアップ読込</button>
 <input id="settingRestoreFile" type="file" accept="application/json" style="display:none" onchange="restoreBackup(event)">
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0">
@@ -3058,17 +3058,88 @@ function castBackEditor(c){let b=castBackSettings(c);let fields=[['時給','hour
 }
 function renderSettings(){renderDefaultBackSettings();let rows=state.casts.map(c=>`<tr><td>${c.name}<div class="muted">${c.hidden?'非表示':'表示中'} / ${c.useDefaultBack!==false?'店舗標準':'個別設定'}</div></td><td><input value="${c.name}" onchange="state.casts.find(x=>x.id==='${c.id}').name=this.value;render()"></td><td>${castBackEditor(c)}</td><td>${c.hidden?`<button class="btn ok small" onclick="restoreCast('${c.id}')">再表示</button>`:`<button class="btn warn small" onclick="hideCast('${c.id}')">非表示</button>`}<button class="btn bad small" style="margin-left:4px" onclick="deleteCast('${c.id}')">削除</button></td></tr>`).join('');castSettingRows.innerHTML=rows;champRows.innerHTML=CH.map(c=>`<tr><td>${c.name}</td><td class="right">${yen(c.price)}</td><td class="right">${yen(c.cost)}</td></tr>`).join('')}
 
-function resetAllData(){
+async function starterReset(){
   if(!requireAdmin()) return;
-  const word = prompt('全データを初期化します。実行する場合は「初期化」と入力してください。');
-  if(word !== '初期化') return;
-  localStorage.removeItem(KEY);
-  state = init();
-  active = 'A1';
-  closingArea.innerHTML = '';
-  weekArea.innerHTML = '';
-  alert('初期化しました。');
-  render();
+  const cfg=getCloudConfig();
+  if(!cloudConfigReady(cfg)){
+    alert('Firebaseの同期リンクまたは保存パスが未設定です。先に同期設定を確認してください。');
+    return;
+  }
+  if(!confirm('スターターを実行します。\n\n残すもの：Firebase同期設定、キャスト登録、キャスト単価設定\n消すもの：過去の会計・卓・入客数・締め票・出退勤・未収・レジ金・監査ログなど\n\nこの操作は元に戻せません。続けますか？')) return;
+  const word=prompt('最終確認です。実行する場合は「スターター」と入力してください。');
+  if(word!=='スターター') return;
+
+  const oldState=state;
+  const preservedCasts=(Array.isArray(state.casts)?state.casts:[]).map(c=>({
+    ...JSON.parse(JSON.stringify(c)),
+    status:'off',
+    logs:{}
+  }));
+  const preservedDefaultBack=normalizeBackSettings(state.defaultBackSettings);
+  const fresh=normalizeRestoreDataForLocalStorage({
+    ...init(),
+    businessDate:bizDate(),
+    casts:preservedCasts,
+    defaultBackSettings:preservedDefaultBack,
+    tables:TABLES.map(emptyTable),
+    sales:[],expenses:[],cashFlows:[],closings:[],orderDeleteLogs:[],businessSheets:[],
+    unpaids:[],backups:[],payrollLocks:{},visitorEntries:[],receiptEditAudit:[],receiptEditOtp:null,
+    manualClosingSheets:[],manualClosingDaySheets:[],
+    businessOpen:true,businessStatus:'open',pastBusinessInput:false,
+    starterStartedAt:new Date().toISOString()
+  });
+
+  clearTimeout(autoSyncTimer);
+  clearInterval(autoSyncPollTimer);
+  autoSyncPollTimer=null;
+  pendingAutoSave=null;
+  cloudWriteEnabled=false;
+  autoSyncBusy=true;
+  try{
+    const cleanState=sanitizeBackupState(fresh);
+    const revision=Date.now();
+    const signature=simpleHash(JSON.stringify(cleanState));
+    const payload={
+      app:'Blow2nd_POS',version:'v2.0_beta57_sync_fix',backupVersion:1,
+      updatedAt:new Date().toISOString(),device:cfg.device||'unknown-device',
+      businessDate:cleanState.businessDate||'',
+      counts:{casts:(cleanState.casts||[]).length,sales:0,tables:(cleanState.tables||[]).length},
+      starterReset:true,syncRevision:revision,stateSignature:signature,
+      state:cleanState,data:cleanState
+    };
+    setCloudStatus('スターター実行中…Firebase母体を初期化しています。');
+    const res=await fetch(buildCloudEndpoint(cfg),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const text=await res.text();
+    if(!res.ok) throw new Error('Firebase更新失敗 HTTP '+res.status+' '+text);
+    const written=text?JSON.parse(text):null;
+    if(!written || !(written.state||written.data)) throw new Error('Firebaseへの書込結果が空です');
+
+    state=fresh;
+    active=TABLES[0];
+    applyingRemoteState=true;
+    localStorage.setItem(KEY,JSON.stringify(stateForLocalStorage()));
+    applyingRemoteState=false;
+    lastRemoteUpdatedAt=revision;
+    lastRemoteSignature=signature;
+    lastLocalStateJson=signature;
+    cloudHydrated=true;
+    cloudWriteEnabled=true;
+    localStorage.setItem(CLOUD_KEY,JSON.stringify({...cfg,lastSyncAt:Date.now(),lastAction:'starter'}));
+    if(document.getElementById('closingArea')) closingArea.innerHTML='';
+    if(document.getElementById('weekArea')) weekArea.innerHTML='';
+    autoSyncBusy=false;
+    render();
+    if(isAutoSyncEnabled()) startAutoSync();
+    alert('スターター完了。\nFirebase同期設定とキャスト情報を残し、営業データを今日からの初期状態にしました。');
+  }catch(e){
+    state=oldState;
+    autoSyncBusy=false;
+    cloudWriteEnabled=cloudHydrated;
+    setCloudStatus('スターター失敗: '+(e.message||e),true);
+    if(isAutoSyncEnabled()) startAutoSync();
+    alert('スターターを中止しました。Firebase更新に失敗したため、現在のデータは変更していません。');
+    console.error(e);
+  }
 }
 
 
