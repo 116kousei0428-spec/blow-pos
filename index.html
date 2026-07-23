@@ -860,6 +860,14 @@ async function autoCloudSave(json,sig){
     if(pendingAutoSave){const next=pendingAutoSave;pendingAutoSave=null;setTimeout(()=>autoCloudSave(next.json,next.sig),100)}
   }
 }
+const VISITOR_HISTORY_CLEANUP_VERSION='2026-07-23-v2';
+function applyOneTimeVisitorHistoryCleanup(){
+  if(state.visitorHistoryCleanupVersion===VISITOR_HISTORY_CLEANUP_VERSION)return false;
+  state.visitorEntries=[];
+  state.visitorEntriesMigrated=true;
+  state.visitorHistoryCleanupVersion=VISITOR_HISTORY_CLEANUP_VERSION;
+  return true;
+}
 async function pollCloudChanges(){
   if(autoSyncBusy||applyingRemoteState||!isAutoSyncEnabled()||document.hidden)return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
@@ -876,7 +884,17 @@ async function pollCloudChanges(){
     const remoteTs=Number(data.syncRevision||Date.parse(data.updatedAt)||0);
     const remoteSig=data.stateSignature||simpleHash(JSON.stringify(nextState));
     const localSig=simpleHash(JSON.stringify(stateForLocalStorage()));
-    if(remoteSig===localSig){lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);cloudHydrated=true;cloudWriteEnabled=true;return}
+    if(remoteSig===localSig){
+      lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);cloudHydrated=true;cloudWriteEnabled=true;
+      if(applyOneTimeVisitorHistoryCleanup()){
+        const cleanedJson=JSON.stringify(stateForLocalStorage());
+        localStorage.setItem(KEY,cleanedJson);
+        lastLocalStateJson='';
+        scheduleAutoCloudSave(cleanedJson);
+        render();
+      }
+      return;
+    }
     if(data.device===(cfg.device||'unknown-device')&&remoteSig===lastRemoteSignature)return;
     if(remoteTs && remoteTs<=lastRemoteUpdatedAt)return;
     applyingRemoteState=true;
@@ -885,8 +903,15 @@ async function pollCloudChanges(){
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
     localStorage.setItem(KEY,JSON.stringify(stateForLocalStorage()));
     cloudHydrated=true; cloudWriteEnabled=true;
-    localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},cfg,{lastSyncAt:Date.now(),lastAction:'auto-load'})));
-    setCloudStatus('自動同期中\n他端末の変更を反映: '+new Date().toLocaleString()+'\n送信元: '+(data.device||'-'));
+    const visitorCleanupApplied=applyOneTimeVisitorHistoryCleanup();
+    if(visitorCleanupApplied){
+      const cleanedJson=JSON.stringify(stateForLocalStorage());
+      localStorage.setItem(KEY,cleanedJson);
+      lastLocalStateJson='';
+      scheduleAutoCloudSave(cleanedJson);
+    }
+    localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},cfg,{lastSyncAt:Date.now(),lastAction:visitorCleanupApplied?'visitor-history-cleanup':'auto-load'})));
+    setCloudStatus(visitorCleanupApplied?'過去の入客履歴を消去し、Firebaseへ反映中…':'自動同期中\n他端末の変更を反映: '+new Date().toLocaleString()+'\n送信元: '+(data.device||'-'));
     render();
   }catch(e){setCloudStatus('自動同期エラー: '+(e.message||e),true)}finally{applyingRemoteState=false;autoSyncBusy=false}
 }
@@ -2576,6 +2601,8 @@ function normalizeRestoreDataForLocalStorage(data){
   restored.businessSheets=Array.isArray(restored.businessSheets)?restored.businessSheets:[];
   restored.unpaids=Array.isArray(restored.unpaids)?restored.unpaids:[];
   restored.payrollLocks=restored.payrollLocks||{};
+  restored.visitorEntries=Array.isArray(restored.visitorEntries)?restored.visitorEntries:[];
+  restored.visitorEntriesMigrated=restored.visitorEntriesMigrated===true;
   restored.manualClosingSheets=Array.isArray(restored.manualClosingSheets)?restored.manualClosingSheets:[];
   restored.manualClosingDaySheets=Array.isArray(restored.manualClosingDaySheets)?restored.manualClosingDaySheets:[];
   return restored;
@@ -3083,9 +3110,10 @@ async function starterReset(){
     defaultBackSettings:preservedDefaultBack,
     tables:TABLES.map(emptyTable),
     sales:[],expenses:[],cashFlows:[],closings:[],orderDeleteLogs:[],businessSheets:[],
-    unpaids:[],backups:[],payrollLocks:{},visitorEntries:[],receiptEditAudit:[],receiptEditOtp:null,
+    unpaids:[],backups:[],payrollLocks:{},visitorEntries:[],visitorEntriesMigrated:true,receiptEditAudit:[],receiptEditOtp:null,
     manualClosingSheets:[],manualClosingDaySheets:[],
     businessOpen:true,businessStatus:'open',pastBusinessInput:false,
+    visitorHistoryCleanupVersion:VISITOR_HISTORY_CLEANUP_VERSION,
     starterStartedAt:new Date().toISOString()
   });
 
