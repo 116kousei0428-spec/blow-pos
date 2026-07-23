@@ -437,7 +437,7 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
         <div><label>端末名</label><input id="cloudDevice" placeholder="PC / iPhone など"></div>
       </div>
       <div class="row" style="margin-top:10px">
-        <button class="btn blue" onclick="saveCloudConfig()">同期設定を保存</button>
+        <button class="btn blue admin-only" onclick="saveCloudConfig();startAutoSync()">同期設定を保存して再接続</button>
         <button id="autoSyncBtn" class="btn ok" onclick="toggleAutoSync()">自動同期をON</button>
         <button class="btn ok" onclick="cloudSave()">今すぐ保存</button>
         <button class="btn warn" onclick="cloudLoad()">今すぐ読込</button>
@@ -918,8 +918,8 @@ function getCloudConfig(){
   try{saved=JSON.parse(localStorage.getItem(CLOUD_KEY)||'{}')||{}}catch(e){saved={}}
   const cfg={
     ...saved,
-    dbUrl:FIXED_CLOUD_DB_URL,
-    path:FIXED_CLOUD_PATH,
+    dbUrl:normalizeCloudUrl(saved.dbUrl)||FIXED_CLOUD_DB_URL,
+    path:normalizeCloudPath(saved.path||FIXED_CLOUD_PATH),
     autoSync:saved.autoSync!==false,
     device:saved.device||('device-'+Math.random().toString(36).slice(2,8))
   };
@@ -950,24 +950,28 @@ function buildCloudEndpoint(cfg){
 }
 function renderCloudSync(){
   const cfg=getCloudConfig();
-  const db=document.getElementById('cloudDbUrl'); if(db){db.value=FIXED_CLOUD_DB_URL;db.readOnly=true;}
-  const path=document.getElementById('cloudPath'); if(path){path.value=FIXED_CLOUD_PATH;path.readOnly=true;}
-  const auth=document.getElementById('cloudAuth'); if(auth)auth.value=cfg.auth||'';
-  const dev=document.getElementById('cloudDevice'); if(dev)dev.value=cfg.device;
+  const db=document.getElementById('cloudDbUrl'); if(db){db.value=cfg.dbUrl||FIXED_CLOUD_DB_URL;db.readOnly=!isAdmin;}
+  const path=document.getElementById('cloudPath'); if(path){path.value=cfg.path||FIXED_CLOUD_PATH;path.readOnly=!isAdmin;}
+  const auth=document.getElementById('cloudAuth'); if(auth){auth.value=cfg.auth||'';auth.readOnly=!isAdmin;}
+  const dev=document.getElementById('cloudDevice'); if(dev){dev.value=cfg.device;dev.readOnly=!isAdmin;}
   const last=cfg.lastSyncAt?'\n最終同期: '+new Date(cfg.lastSyncAt).toLocaleString()+' / '+(cfg.lastAction||''):'';
   setCloudStatus((cfg.dbUrl?'同期設定あり':'未設定')+last+(cfg.autoSync?'\n自動同期: ON':'\n自動同期: OFF'));
   updateAutoSyncButton();
 }
 function saveCloudConfig(){
-  const cfg=Object.assign({},getCloudConfig(),{
-    dbUrl:FIXED_CLOUD_DB_URL,
-    path:FIXED_CLOUD_PATH,
-    auth:document.getElementById('cloudAuth')?.value||getCloudConfig().auth||'',
-    device:document.getElementById('cloudDevice')?.value||getCloudConfig().device,
+  if(!requireAdmin())return getCloudConfig();
+  const old=getCloudConfig();
+  const cfg=Object.assign({},old,{
+    dbUrl:normalizeCloudUrl(document.getElementById('cloudDbUrl')?.value||old.dbUrl||FIXED_CLOUD_DB_URL),
+    path:normalizeCloudPath(document.getElementById('cloudPath')?.value||old.path||FIXED_CLOUD_PATH),
+    auth:document.getElementById('cloudAuth')?.value||'',
+    device:document.getElementById('cloudDevice')?.value||old.device,
     autoSync:true
   });
+  if(!cloudConfigReady(cfg)){alert('Firebase URLと保存パスを入力してください');return old;}
   localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
-  setCloudStatus('同期設定を保存しました。');
+  cloudHydrated=false; cloudWriteEnabled=false; lastRemoteUpdatedAt=0; lastRemoteSignature=''; lastLocalStateJson='';
+  setCloudStatus('同期設定を保存しました。新しいリンクの母体データを先に読み込みます。');
   return cfg;
 }
 function cloudStatePayload(cfg){
