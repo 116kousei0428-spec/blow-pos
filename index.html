@@ -823,6 +823,7 @@ function save(){
 
 
 let autoSyncTimer=null, autoSyncPollTimer=null, autoSyncBusy=false, applyingRemoteState=false, pendingAutoSave=null;
+let cloudHydrated=false, cloudWriteEnabled=false;
 let lastLocalStateJson='', lastRemoteUpdatedAt=0, lastRemoteSignature='';
 function cloudConfigReady(cfg=getCloudConfig()){return !!(normalizeCloudUrl(cfg.dbUrl)&&normalizeCloudPath(cfg.path))}
 function simpleHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(36)+':'+str.length}
@@ -833,7 +834,7 @@ function updateAutoSyncButton(){
   btn.className=on?'btn bad':'btn ok';
 }
 function scheduleAutoCloudSave(json=''){
-  if(applyingRemoteState||!isAutoSyncEnabled())return;
+  if(applyingRemoteState||!cloudWriteEnabled||!isAutoSyncEnabled())return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
   const current=json||JSON.stringify(stateForLocalStorage());
   const sig=simpleHash(current); if(sig===lastLocalStateJson)return;
@@ -841,7 +842,7 @@ function scheduleAutoCloudSave(json=''){
   autoSyncTimer=setTimeout(()=>autoCloudSave(current,sig),700);
 }
 async function autoCloudSave(json,sig){
-  if(applyingRemoteState||!isAutoSyncEnabled())return;
+  if(applyingRemoteState||!cloudWriteEnabled||!isAutoSyncEnabled())return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
   if(autoSyncBusy){pendingAutoSave={json,sig};return}
   autoSyncBusy=true;
@@ -867,11 +868,15 @@ async function pollCloudChanges(){
     const res=await fetch(buildCloudEndpoint(cfg),{method:'GET',cache:'no-store'});
     const text=await res.text(); if(!res.ok)throw new Error('自動読込失敗 HTTP '+res.status+' '+text);
     const data=text?JSON.parse(text):null; const nextState=data&&(data.state||data.data);
-    if(!nextState){scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));return}
+    if(!nextState){
+      cloudHydrated=false; cloudWriteEnabled=false;
+      setCloudStatus('Firebase側に母体データがありません。端末データの自動送信は停止しています。',true);
+      return;
+    }
     const remoteTs=Number(data.syncRevision||Date.parse(data.updatedAt)||0);
     const remoteSig=data.stateSignature||simpleHash(JSON.stringify(nextState));
     const localSig=simpleHash(JSON.stringify(stateForLocalStorage()));
-    if(remoteSig===localSig){lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);return}
+    if(remoteSig===localSig){lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);cloudHydrated=true;cloudWriteEnabled=true;return}
     if(data.device===(cfg.device||'unknown-device')&&remoteSig===lastRemoteSignature)return;
     if(remoteTs && remoteTs<=lastRemoteUpdatedAt)return;
     applyingRemoteState=true;
@@ -879,18 +884,25 @@ async function pollCloudChanges(){
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
     localStorage.setItem(KEY,JSON.stringify(stateForLocalStorage()));
+    cloudHydrated=true; cloudWriteEnabled=true;
     localStorage.setItem(CLOUD_KEY,JSON.stringify(Object.assign({},cfg,{lastSyncAt:Date.now(),lastAction:'auto-load'})));
     setCloudStatus('自動同期中\n他端末の変更を反映: '+new Date().toLocaleString()+'\n送信元: '+(data.device||'-'));
     render();
   }catch(e){setCloudStatus('自動同期エラー: '+(e.message||e),true)}finally{applyingRemoteState=false;autoSyncBusy=false}
 }
-function startAutoSync(){
+async function startAutoSync(){
   clearInterval(autoSyncPollTimer); autoSyncPollTimer=null;
+  clearTimeout(autoSyncTimer); pendingAutoSave=null;
+  cloudHydrated=false; cloudWriteEnabled=false;
   if(!isAutoSyncEnabled())return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg)){setCloudStatus('Firebase URLと保存パスを設定してください',true);return}
-  lastLocalStateJson=simpleHash(JSON.stringify(stateForLocalStorage()));
-  pollCloudChanges(); autoSyncPollTimer=setInterval(pollCloudChanges,2500);
-  setCloudStatus('自動同期を開始しました。変更は数秒以内に共有されます。');
+  setCloudStatus('Firebaseの母体データを読み込み中…');
+  await pollCloudChanges();
+  if(cloudHydrated){
+    lastLocalStateJson=simpleHash(JSON.stringify(stateForLocalStorage()));
+    setCloudStatus('Firebaseを母体として同期中。読込完了後の変更だけ送信します。');
+  }
+  autoSyncPollTimer=setInterval(pollCloudChanges,2500);
 }
 function toggleAutoSync(){
   const cfg=saveCloudConfig();
@@ -898,8 +910,7 @@ function toggleAutoSync(){
   localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
   updateAutoSyncButton();
   startAutoSync();
-  scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));
-  setCloudStatus('固定接続の自動同期を再開しました。');
+  setCloudStatus('Firebaseを先に読み込んで再接続します。');
 }
 
 function getCloudConfig(){
