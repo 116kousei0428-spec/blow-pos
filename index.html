@@ -662,6 +662,8 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
 
 const KEY='blow_amami_pos_v1_full', PASS='3112', ADMIN_PASS='2005170428', VIEWER_PASS='0120', PROFIT_PASS='3112', HISTORY_PASS='3112', RECEIPT_GRANT_MS=30*60*1000, TABLES=['C1','C2','C3','C4','A1','A2','A3','A4','A5'];
 const CLOUD_KEY='blow_amami_pos_cloud_sync_v1';
+const FIXED_CLOUD_DB_URL='https://blow-pos-default-rtdb.asia-southeast1.firebasedatabase.app';
+const FIXED_CLOUD_PATH='blow2nd/main';
 const BASIC_SET_MIN=60, HALF_EXTEND_MIN=30, FULL_EXTEND_MIN=60;
 const JOUNAI_BACK=500;
 const CH=[['ori','オリシャン','オリシャン',25000,4000],['orivip','オリシャンVIP','オリシャン',40000,5000],['vy','ヴーヴイエロー','ヴーヴ',30000,8000],['vw','ヴーヴホワイト','ヴーヴ',35000,9000],['moet','モエピカ','モエ',50000,10000],['belle','ベルエポック','ベル',80000,25000],['beller','ベルエポックロゼ','ベル',150000,46000],['soumei','ソウメイ','ソウメイ',100000,28000],['soumeib','ソウメイブルー','ソウメイ',150000,45000],['soumeir','ソウメイロゼ','ソウメイ',180000,48000],['soumeip','ソウメイプラチナ','ソウメイ',300000,80000],['ag','アルマンドゴールド','アルマンド',200000,50000],['ap','アルマンドピンク','アルマンド',280000,70000],['agr','アルマンドグリーン','アルマンド',350000,100000],['as','アルマンド信号機','アルマンド',800000,0]].map(x=>({id:x[0],name:x[1],cat:x[2],price:x[3],cost:x[4]}));
@@ -827,7 +829,7 @@ function simpleHash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.c
 function isAutoSyncEnabled(){return getCloudConfig().autoSync===true}
 function updateAutoSyncButton(){
   const btn=document.getElementById('autoSyncBtn'); if(!btn)return;
-  const on=isAutoSyncEnabled(); btn.textContent=on?'自動同期をOFF':'自動同期をON';
+  const on=isAutoSyncEnabled(); btn.textContent='自動同期を再接続';
   btn.className=on?'btn bad':'btn ok';
 }
 function scheduleAutoCloudSave(json=''){
@@ -892,15 +894,28 @@ function startAutoSync(){
 }
 function toggleAutoSync(){
   const cfg=saveCloudConfig();
-  if(!cloudConfigReady(cfg)){setCloudStatus('Firebase URLと保存パスを設定してください',true);return}
-  cfg.autoSync=!isAutoSyncEnabled();
-  localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg)); updateAutoSyncButton();
-  if(cfg.autoSync){startAutoSync(); scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()))}
-  else{clearInterval(autoSyncPollTimer);autoSyncPollTimer=null;setCloudStatus('自動同期を停止しました。')}
+  cfg.autoSync=true;
+  localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
+  updateAutoSyncButton();
+  startAutoSync();
+  scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));
+  setCloudStatus('固定接続の自動同期を再開しました。');
 }
 
 function getCloudConfig(){
-  try{return JSON.parse(localStorage.getItem(CLOUD_KEY)||'{}')||{}}catch(e){return {}}
+  let saved={};
+  try{saved=JSON.parse(localStorage.getItem(CLOUD_KEY)||'{}')||{}}catch(e){saved={}}
+  const cfg={
+    ...saved,
+    dbUrl:FIXED_CLOUD_DB_URL,
+    path:FIXED_CLOUD_PATH,
+    autoSync:saved.autoSync!==false,
+    device:saved.device||('device-'+Math.random().toString(36).slice(2,8))
+  };
+  if(saved.dbUrl!==cfg.dbUrl||saved.path!==cfg.path||saved.autoSync!==cfg.autoSync||saved.device!==cfg.device){
+    localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
+  }
+  return cfg;
 }
 function setCloudStatus(msg,isError=false){
   const el=document.getElementById('cloudStatus');
@@ -924,20 +939,21 @@ function buildCloudEndpoint(cfg){
 }
 function renderCloudSync(){
   const cfg=getCloudConfig();
-  const db=document.getElementById('cloudDbUrl'); if(db)db.value=cfg.dbUrl||'';
-  const path=document.getElementById('cloudPath'); if(path)path.value=cfg.path||'blow2nd/main';
+  const db=document.getElementById('cloudDbUrl'); if(db){db.value=FIXED_CLOUD_DB_URL;db.readOnly=true;}
+  const path=document.getElementById('cloudPath'); if(path){path.value=FIXED_CLOUD_PATH;path.readOnly=true;}
   const auth=document.getElementById('cloudAuth'); if(auth)auth.value=cfg.auth||'';
-  const dev=document.getElementById('cloudDevice'); if(dev)dev.value=cfg.device||('device-'+Math.random().toString(36).slice(2,8));
+  const dev=document.getElementById('cloudDevice'); if(dev)dev.value=cfg.device;
   const last=cfg.lastSyncAt?'\n最終同期: '+new Date(cfg.lastSyncAt).toLocaleString()+' / '+(cfg.lastAction||''):'';
   setCloudStatus((cfg.dbUrl?'同期設定あり':'未設定')+last+(cfg.autoSync?'\n自動同期: ON':'\n自動同期: OFF'));
   updateAutoSyncButton();
 }
 function saveCloudConfig(){
   const cfg=Object.assign({},getCloudConfig(),{
-    dbUrl:normalizeCloudUrl(document.getElementById('cloudDbUrl')?.value||''),
-    path:normalizeCloudPath(document.getElementById('cloudPath')?.value||'blow2nd/main'),
-    auth:document.getElementById('cloudAuth')?.value||'',
-    device:document.getElementById('cloudDevice')?.value||'unknown-device'
+    dbUrl:FIXED_CLOUD_DB_URL,
+    path:FIXED_CLOUD_PATH,
+    auth:document.getElementById('cloudAuth')?.value||getCloudConfig().auth||'',
+    device:document.getElementById('cloudDevice')?.value||getCloudConfig().device,
+    autoSync:true
   });
   localStorage.setItem(CLOUD_KEY,JSON.stringify(cfg));
   setCloudStatus('同期設定を保存しました。');
