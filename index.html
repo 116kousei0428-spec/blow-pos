@@ -1328,7 +1328,32 @@ function operationPhaseEntries(t,key,phase){
   const map=ensureOperationPhases(t)[key]||{};
   return Object.entries(map).map(([cid,phases])=>({cid,count:(phases||[]).filter(p=>Number(p)===Number(phase)).length})).filter(x=>x.count>0);
 }
-function addExtension(id,kind,manualStartAt){let t=state.tables.find(x=>x.id===id);if(!t||t.status!=='busy')return;normalizeOrderPhases(t);let phase=currentOrderPhase(t)+1;let isHalf=kind==='half',min=isHalf?HALF_EXTEND_MIN:FULL_EXTEND_MIN;let extStart=manualStartAt?new Date(manualStartAt):extensionStartAt(t);let chargeAt=extStart;let price=extensionPrice(kind,chargeAt,t.guests);t.serviceMinutes=(t.serviceMinutes||BASIC_SET_MIN)+min;t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,orderPhase:phase,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});(t.jounai||[]).forEach(cid=>addJounaiCharge(t,cid,1,phase));render()}
+function carryActiveJounaiToPhase(t,phase){
+  if(!t)return;
+  const target=Math.max(0,Number(phase)||0);
+  const active=[...new Set(t.jounai||[])];
+  const all=ensureOperationPhases(t),map=all.jounai||(all.jounai={}),counts=ensureJounaiCounts(t);
+  active.forEach(cid=>{
+    if(!Array.isArray(map[cid]))map[cid]=[];
+    if(!map[cid].some(p=>Number(p)===target))map[cid].push(target);
+    map[cid]=[...new Set(map[cid].map(v=>Math.max(0,Number(v)||0)))].sort((a,b)=>a-b);
+    counts[cid]=map[cid].length;
+  });
+}
+function addExtension(id,kind,manualStartAt){
+  let t=state.tables.find(x=>x.id===id);if(!t||t.status!=='busy')return;
+  normalizeOrderPhases(t);
+  let phase=currentOrderPhase(t)+1;
+  let isHalf=kind==='half',min=isHalf?HALF_EXTEND_MIN:FULL_EXTEND_MIN;
+  let extStart=manualStartAt?new Date(manualStartAt):extensionStartAt(t),chargeAt=extStart;
+  let price=extensionPrice(kind,chargeAt,t.guests);
+  t.serviceMinutes=(t.serviceMinutes||BASIC_SET_MIN)+min;
+  t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,orderPhase:phase,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});
+  // 延長確定時点で、現在場内中のキャストを次セットへ必ず1回だけ自動継続する。
+  carryActiveJounaiToPhase(t,phase);
+  repairOperationPhases(t);
+  render();
+}
 function openExtensionAdd(tableId,kind){
   let t=state.tables.find(x=>x.id===tableId);
   if(!t||t.status!=='busy')return;
@@ -3723,7 +3748,7 @@ function runPosSelfTests(){
   let testTable={guests:1,nominations:['c1'],jounai:['c2'],dohan:[],after:[],items:[{type:'extension',price:3000,qty:1}],startedAt:new Date().toISOString(),payment:'cash'};
   console.assert(repeatChargeCount(testTable)===2,'延長1回で初回+延長の2回分');
   console.assert(calc(testTable).nomination===4000,'指名料金は延長ごとに加算');
-  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');
+  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');let carryTest={jounai:['c9'],jounaiCounts:{c9:1},operationPhases:{nominations:{},dohan:{},jounai:{c9:[0]},after:{}},items:[{type:'extension',qty:1,orderPhase:1}]};carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','延長確定時に場内を次セットへ自動継続');carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','同じ延長セットへ二重追加しない');
   console.assert(calc(testTable).single===4000,'シングルチャージは延長ごとに加算');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','22:59'),'2026-05-23')===5000,'延長料金は22:59まで5000円');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','23:00'),'2026-05-23')===6000,'延長料金は23:00から6000円');
