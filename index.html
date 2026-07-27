@@ -1306,7 +1306,25 @@ function removeOperationPhase(t,key,cid,qty=1){
   arr.splice(Math.max(0,arr.length-Math.max(1,Number(qty)||1)),Math.max(1,Number(qty)||1));
   if(!arr.length&&all[key])delete all[key][cid];
 }
+function repairOperationPhases(t){
+  if(!t)return;
+  const all=ensureOperationPhases(t),maxPhase=currentOrderPhase(t),active=new Set(t.jounai||[]),counts=ensureJounaiCounts(t);
+  // 場内は「押したセットから開始し、その後の延長セットへ自動継続」。
+  // 同じキャストは同じセット内で必ず1回までにし、旧重複記録も自動補正する。
+  active.forEach(cid=>{
+    let raw=Array.isArray(all.jounai[cid])?all.jounai[cid]:[];
+    let phases=[...new Set(raw.map(v=>Math.max(0,Math.min(maxPhase,Number(v)||0))))].sort((a,b)=>a-b);
+    let first=phases.length?phases[0]:Math.max(0,Math.min(maxPhase,(Number(counts[cid])||1)-1));
+    phases=[];
+    for(let phase=first;phase<=maxPhase;phase++)phases.push(phase);
+    all.jounai[cid]=phases;
+    counts[cid]=phases.length;
+  });
+  Object.keys(all.jounai||{}).forEach(cid=>{if(!active.has(cid))delete all.jounai[cid];});
+  Object.keys(counts).forEach(cid=>{if(!active.has(cid))delete counts[cid];});
+}
 function operationPhaseEntries(t,key,phase){
+  if(key==='jounai')repairOperationPhases(t);
   const map=ensureOperationPhases(t)[key]||{};
   return Object.entries(map).map(([cid,phases])=>({cid,count:(phases||[]).filter(p=>Number(p)===Number(phase)).length})).filter(x=>x.count>0);
 }
@@ -1364,10 +1382,15 @@ function ensureJounaiCounts(t){
   return t.jounaiCounts;
 }
 function addJounaiCharge(t,cid,qty=1,phase=currentOrderPhase(t)){
-  if(!t||!cid)return;
-  let counts=ensureJounaiCounts(t),n=Math.max(1,Number(qty)||1);
-  counts[cid]=(Number(counts[cid])||0)+n;
-  for(let i=0;i<n;i++)addOperationPhase(t,'jounai',cid,phase);
+  if(!t||!cid)return false;
+  const all=ensureOperationPhases(t),map=all.jounai||(all.jounai={}),target=Math.max(0,Number(phase)||0);
+  if(!Array.isArray(map[cid]))map[cid]=[];
+  // 同じ卓・同じセット・同じキャストは1回まで。延長時の別セット自動追加は残す。
+  if(map[cid].some(p=>Number(p)===target))return false;
+  map[cid].push(target);
+  map[cid]=[...new Set(map[cid].map(Number))].sort((a,b)=>a-b);
+  ensureJounaiCounts(t)[cid]=map[cid].length;
+  return true;
 }
 function jounaiChargeCount(t){
   let counts=ensureJounaiCounts(t);
@@ -1670,7 +1693,7 @@ function details(t,c){
   ensureOperationPhases(t);
   const nominationUnit=Number(t.nominationUnitPrice??2000)||0;
   const phaseCount=currentOrderPhase(t);
-  let phaseHtml='';
+  let phaseHtml='',allocatedSubtotal=0;
   for(let phase=0;phase<=phaseCount;phase++){
     const title=phase===0?'初回':`${phase}回目延長`;
     const phaseItems=(t.items||[]).filter(i=>itemOrderPhase(t,i)===phase && phaseItemAmount(i)>0);
@@ -1696,8 +1719,9 @@ function details(t,c){
       let edit=i.type==='extension'?`<button class="btn blue small" onclick="event.stopPropagation();openExtensionEdit('${t.id}','${i.id}')">延長修正</button>`:'';
       rows+=`<tr><td>${label}<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${edit}<button class="btn out small" onclick="event.stopPropagation();deleteOrderItem('${t.id}','${i.id}')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;
     });
-    if(rows)phaseHtml+=`<tr class="order-phase-row"><th colspan="2">${title}</th></tr>${rows}<tr class="order-phase-subtotal"><td>${title} 小計</td><td class="right">${yen(subtotal)}</td></tr>`;
+    if(rows){allocatedSubtotal+=subtotal;phaseHtml+=`<tr class="order-phase-row"><th colspan="2">${title}</th></tr>${rows}<tr class="order-phase-subtotal"><td>${title} 小計</td><td class="right">${yen(subtotal)}</td></tr>`;}
   }
+  if(Math.round(allocatedSubtotal)!==Math.round(c.subtotal))console.warn('明細区分小計の不一致', {table:t.id,allocatedSubtotal,subtotal:c.subtotal});
   let totalRows=[['小計',c.subtotal],['TAX',c.tax],['サービス',c.service],['カード',c.card]].filter(x=>x[1]>0);
   const baseDue=Math.round((+c.subtotal||0)+(+c.tax||0)+(+c.service||0));
   const prepays=tablePrepayments(t);
@@ -3699,7 +3723,7 @@ function runPosSelfTests(){
   let testTable={guests:1,nominations:['c1'],jounai:['c2'],dohan:[],after:[],items:[{type:'extension',price:3000,qty:1}],startedAt:new Date().toISOString(),payment:'cash'};
   console.assert(repeatChargeCount(testTable)===2,'延長1回で初回+延長の2回分');
   console.assert(calc(testTable).nomination===4000,'指名料金は延長ごとに加算');
-  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:[],jounaiCounts:{},dohan:[],after:[],items:[],startedAt:new Date().toISOString(),payment:'cash'};jt.items.push({type:'extension',price:3000,qty:1});jt.jounai=['c2'];addJounaiCharge(jt,'c2',1);console.assert(calc(jt).jounai===1000,'延長後に追加した場内は過去分へ遡らず1回分');addJounaiCharge(jt,'c2',1);console.assert(calc(jt).jounai===2000,'場内追加後の次延長で1回分ずつ増える');
+  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');
   console.assert(calc(testTable).single===4000,'シングルチャージは延長ごとに加算');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','22:59'),'2026-05-23')===5000,'延長料金は22:59まで5000円');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','23:00'),'2026-05-23')===6000,'延長料金は23:00から6000円');
