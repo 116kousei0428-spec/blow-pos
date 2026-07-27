@@ -357,6 +357,7 @@ body.viewer-mode #casts,body.viewer-mode #backup,body.viewer-mode #cloud,body.vi
 body.viewer-mode .viewer-hidden{display:none!important}
 body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mode textarea:disabled{opacity:.75;background:#f1f5f9;color:#334155}
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -453,7 +454,7 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
     </div>
   </section>
 
-  <section id="settings" class="screen"><div class="card"><h2>店舗標準 給与・バック設定</h2><p class="muted">ここを変えると標準設定を使うキャスト、新規追加キャスト、給与計算・バック計算に反映します。</p><div class="grid4" id="defaultBackSettingsBox"></div></div><div class="card" style="margin-top:12px"><h2>シャンパン原価</h2><div class="scroll"><table><thead><tr><th>商品</th><th class="right">売価</th><th class="right">原価</th></tr></thead><tbody id="champRows"></tbody></table></div></div><div class="card admin-only" style="margin-top:12px;border-color:#fecaca"><h2 class="danger">スターター</h2><p class="muted">Firebaseの同期リンク・保存パス・自動同期設定とキャスト登録／単価設定を残し、過去の会計・卓・入客数・締め票・出退勤・監査ログなどの営業データだけを消します。今日から新規運用を始める時に一度だけ実行してください。</p><button class="btn bad" onclick="starterReset()">スターター</button>
+  <section id="settings" class="screen"><div class="card admin-only" style="margin-bottom:12px;border-color:#bfdbfe"><div class="row"><h2>メンテナンス</h2><button class="btn out" onclick="renderMaintenanceStatus()">再確認</button></div><p class="muted">過去会計・給与・締め票・キャスト・Firebase設定は削除しません。この奄美版の表示用バックアップ履歴と一時データだけを整理します。</p><div id="maintenanceStatus" class="summary" style="margin-top:10px"></div><div class="row" style="margin-top:10px"><button class="btn warn" onclick="runSafeMaintenance()">安全メンテナンス実行</button></div></div><div class="card"><h2>店舗標準 給与・バック設定</h2><p class="muted">ここを変えると標準設定を使うキャスト、新規追加キャスト、給与計算・バック計算に反映します。</p><div class="grid4" id="defaultBackSettingsBox"></div></div><div class="card" style="margin-top:12px"><h2>シャンパン原価</h2><div class="scroll"><table><thead><tr><th>商品</th><th class="right">売価</th><th class="right">原価</th></tr></thead><tbody id="champRows"></tbody></table></div></div><div class="card admin-only" style="margin-top:12px;border-color:#fecaca"><h2 class="danger">スターター</h2><p class="muted">Firebaseの同期リンク・保存パス・自動同期設定とキャスト登録／単価設定を残し、過去の会計・卓・入客数・締め票・出退勤・監査ログなどの営業データだけを消します。今日から新規運用を始める時に一度だけ実行してください。</p><button class="btn bad" onclick="starterReset()">スターター</button>
 <button class="btn out" onclick="document.getElementById('settingRestoreFile').click()">バックアップ読込</button>
 <input id="settingRestoreFile" type="file" accept="application/json" style="display:none" onchange="restoreBackup(event)">
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:14px 0">
@@ -2672,7 +2673,7 @@ function makeMonthly(){
   let dates=monthDays(ym+'-01');
   let rows=dates.map(d=>{let s=daySum(d);return `<tr><td>${d}</td><td class="right">${yen(s.sales)}</td><td class="right">${yen(s.labor)}</td><td class="right">${yen(s.back)}</td><td class="right">${yen(s.payroll)}</td><td class="right">${yen(s.expenses)}</td><td class="right">${yen(s.profit)}</td></tr>`}).join('');
   let total=dates.reduce((a,d)=>{let s=daySum(d);a.sales+=s.sales;a.labor+=s.labor;a.back+=s.back;a.payroll+=s.payroll;a.expenses+=s.expenses;a.profit+=s.profit;return a},{sales:0,labor:0,back:0,payroll:0,expenses:0,profit:0});
-  closingArea.innerHTML=`<div class="card"><div class="row"><h2>月締め票 ${ym}</h2><button class="btn out no-print" onclick="printElement('closingArea')">締め票印刷</button></div><div class="scroll"><table><thead><tr><th>日付</th><th class="right">売上</th><th class="right">人件費</th><th class="right">バック</th><th class="right">給与合計</th><th class="right">仕入れ支出</th><th class="right">純利益</th></tr></thead><tbody>${rows}<tr><th>合計</th><th class="right">${yen(total.sales)}</th><th class="right">${yen(total.labor)}</th><th class="right">${yen(total.back)}</th><th class="right">${yen(total.payroll)}</th><th class="right">${yen(total.expenses)}</th><th class="right">${yen(total.profit)}</th></tr></tbody></table></div></div>`;
+  closingArea.innerHTML=`<div class="card"><div class="row"><h2>月締め票 ${ym}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveSheetScreenshot('closingArea','月締め票_'+ym)">スクショ保存</button></div></div><div class="scroll"><table><thead><tr><th>日付</th><th class="right">売上</th><th class="right">人件費</th><th class="right">バック</th><th class="right">給与合計</th><th class="right">仕入れ支出</th><th class="right">純利益</th></tr></thead><tbody>${rows}<tr><th>合計</th><th class="right">${yen(total.sales)}</th><th class="right">${yen(total.labor)}</th><th class="right">${yen(total.back)}</th><th class="right">${yen(total.payroll)}</th><th class="right">${yen(total.expenses)}</th><th class="right">${yen(total.profit)}</th></tr></tbody></table></div></div>`;
 }
 
 function checkout(id,extra={}){
@@ -3009,7 +3010,7 @@ function makeClosing(){
   let totals={db:0,sb:0,jounai:0,dohan:0,after:0,nom:0,wheel:0,champ:0};
   let rows=state.casts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=getLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||0}</td><td>${l.out||0}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('');
   const cardRows=cd.rows.map(x=>`<tr><td>${x.table}</td><td class="right">${yen(x.base)}</td><td class="right">${yen(x.fee)}</td><td class="right">${yen(x.charge)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">カード会計なし</td></tr>';
-  closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><button class="btn out no-print" onclick="printElement('closingArea')">締め票印刷</button></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金売上</b><span>${yen(bd.cash)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`}
+  closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveSheetScreenshot('closingArea','締め票_'+d)">スクショ保存</button></div></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金売上</b><span>${yen(bd.cash)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`}
 
 function weeklySubtotalBonusFromNomSub(nomSubTotal){
   const subtotal = Math.round((Number(nomSubTotal)||0) * 10);
@@ -3065,8 +3066,8 @@ function payrollSummaryCards(c,totals,label='週間',base=state.businessDate) {
   let bonusSummaryCard = hasBonus ? cardStat(`${label}ボーナス`, bonus.totalBonus) : '';
   return `${fixed}${itemTotals}${bonusBlock}<div class="section">${label}給与まとめ</div><div class="summary" style="margin-top:10px">${cardStat('時間給合計',shownTotals.labor)}${cardStat('バック総額',shownTotals.back)}${bonusSummaryCard}${cardStat('総額',gross)}${cardStatText('控除率',(lock?lock.deductionRate:(c.deductionRate||0))+'%')}${cardStat('控除額',deduction)}${cardStat('支給額',net)}</div>${action}`
 }
-function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><button class="btn out no-print" onclick="printElement('weeklyPrintArea')">週間表印刷</button></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
-function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><button class="btn out no-print" onclick="printElement('monthlyPrintArea')">月間表印刷</button></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
+function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('weeklyPrintArea',safeFileName(c.name)+'_週間表_'+wds[0]+'_'+wds[6])">スクショ保存</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
+function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base))">スクショ保存</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
 function showWeekHistoryMonth(ym){let casts=state.casts||[];let weeks=[];let first=ym+'-01', days=monthDays(first);let used=new Set();days.forEach(d=>{let wk=weekDates(d).join('|');if(!used.has(wk)){used.add(wk);weeks.push(d)}});historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><h3>週間表履歴 ${ym}</h3><p class="muted">月跨ぎありの週間表を履歴データから再表示します。</p>${casts.map(c=>`<div class="section">${c.name}</div>${weeks.map(w=>{let totals=initWeekTotals();let rows=weekDates(w).map(d=>payrollDayRow(c,d,totals)).join('');return `<div class="card" style="margin:10px 0"><h4>${weekDates(w)[0]}〜${weekDates(w)[6]}</h4><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',w)}</div>`}).join('')}`).join('')}</div>`}
 function addCast(){let n=newCast.value.trim();if(!n)return;let base=normalizeBackSettings(state.defaultBackSettings);let custom=Number(newCastDeductionCustom.value||'');if(Number.isFinite(custom)&&custom>0)base.deductionRate=custom;let selected=Number(newCastDeduction?.value||'');if(!newCastDeductionCustom.value&&Number.isFinite(selected)&&selected>0)base.deductionRate=selected;let same=(state.casts||[]).find(c=>(c.name||'').trim()===n);if(same){if(same.hidden){if(confirm(`${n} は非表示キャストに存在します。再表示しますか？`)){same.hidden=false;same.status=same.status||'off';same.useDefaultBack=true;same.backSettings=base;same.deductionRate=base.deductionRate;same.hourly=base.hourly;newCast.value='';newCastDeductionCustom.value='';render();return;}}else{alert(`${n} は既に登録されています`);return;}}state.casts.push({id:uuid(),name:n,status:'off',hourly:base.hourly,deductionRate:base.deductionRate,useDefaultBack:true,backSettings:base,logs:{},hidden:false});newCast.value='';newCastDeductionCustom.value='';render()}
 function hideCast(id){let c=state.casts.find(x=>x.id===id);if(!c)return;if(!confirm(`${c.name} を非表示にしますか？
@@ -3173,6 +3174,62 @@ async function starterReset(){
 
 
 
+
+
+function safeFileName(v){return String(v||'').replace(/[\\/:*?"<>|]/g,'_').replace(/\s+/g,'_').slice(0,80)||'BLOW';}
+function bytesLabel(n){n=Number(n)||0;if(n<1024)return `${n} B`;if(n<1024*1024)return `${(n/1024).toFixed(1)} KB`;return `${(n/1024/1024).toFixed(2)} MB`;}
+function localStorageUsage(){
+  let total=0,current=0,temp=0,keys=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i)||''; const v=localStorage.getItem(k)||''; const size=(k.length+v.length)*2;
+    total+=size; if(k===KEY)current=size;
+    if(k!==KEY && k!==CLOUD_KEY && /blow.*(temp|cache|backup|snapshot|draft)/i.test(k)){temp+=size;keys.push(k);}
+  }
+  return {total,current,temp,keys};
+}
+function renderMaintenanceStatus(){
+  const el=document.getElementById('maintenanceStatus'); if(!el)return;
+  const u=localStorageUsage(); const backupCount=Array.isArray(state.backups)?state.backups.length:0;
+  el.innerHTML=`${cardStat('ブラウザ保存合計',bytesLabel(u.total))}${cardStat('この奄美POS',bytesLabel(u.current))}${cardStat('整理対象一時データ',bytesLabel(u.temp))}${cardStat('表示用バックアップ履歴',backupCount+'件')}`;
+}
+async function runSafeMaintenance(){
+  if(!isAdmin){alert('管理者のみ実行できます。');return;}
+  const before=localStorageUsage();
+  const ok=confirm('安全メンテナンスを実行します。\n\n削除するもの：表示用バックアップ履歴・このPOSの一時データ\n残すもの：過去会計・給与・締め票・キャスト・Firebase設定\n\n実行しますか？');
+  if(!ok)return;
+  try{
+    state.backups=[];
+    before.keys.forEach(k=>localStorage.removeItem(k));
+    const json=JSON.stringify(stateForLocalStorage());
+    localStorage.setItem(KEY,json);
+    scheduleAutoCloudSave(json);
+    const after=localStorageUsage();
+    renderMaintenanceStatus();
+    alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
+  }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
+}
+async function saveSheetScreenshot(id,fileBase){
+  const source=document.getElementById(id);
+  if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
+  if(typeof html2canvas!=='function'){
+    alert('スクショ機能の読み込みに失敗しました。インターネット接続を確認して、POSを再読み込みしてください。');return;
+  }
+  const btns=[...source.querySelectorAll('.no-print')]; btns.forEach(x=>x.dataset.prevDisplay=x.style.display||''); btns.forEach(x=>x.style.display='none');
+  const scrolls=[...source.querySelectorAll('.scroll')]; const old=scrolls.map(x=>({x,overflow:x.style.overflow,width:x.style.width,maxWidth:x.style.maxWidth,height:x.style.height,maxHeight:x.style.maxHeight}));
+  scrolls.forEach(x=>{x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';x.style.height='auto';x.style.maxHeight='none';});
+  const prev={width:source.style.width,maxWidth:source.style.maxWidth,overflow:source.style.overflow};
+  source.style.width='max-content'; source.style.maxWidth='none'; source.style.overflow='visible';
+  try{
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const canvas=await html2canvas(source,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:Math.max(source.scrollWidth,document.documentElement.clientWidth),windowHeight:Math.max(source.scrollHeight,document.documentElement.clientHeight)});
+    const a=document.createElement('a'); a.download=safeFileName(fileBase)+'.png'; a.href=canvas.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
+  }catch(e){console.error(e);alert('スクショ保存に失敗しました。表を再表示してからもう一度実行してください。');}
+  finally{
+    source.style.width=prev.width;source.style.maxWidth=prev.maxWidth;source.style.overflow=prev.overflow;
+    old.forEach(o=>{o.x.style.overflow=o.overflow;o.x.style.width=o.width;o.x.style.maxWidth=o.maxWidth;o.x.style.height=o.height;o.x.style.maxHeight=o.maxHeight;});
+    btns.forEach(x=>x.style.display=x.dataset.prevDisplay||'');
+  }
+}
 
 let __blow2ndPrintLock = false;
 
@@ -3635,6 +3692,8 @@ function runPosSelfTests(){
   console.assert(typeof freezePayroll==='function' && typeof unlockPayroll==='function','給料確定・凍結解除が存在する');
   console.assert(typeof openUnpaidPanel==='function','未収管理が存在する');
   console.assert(typeof createAutoBackup==='function','自動バックアップが存在する');
+  console.assert(typeof runSafeMaintenance==='function','安全メンテナンス機能が存在する');
+  console.assert(typeof saveSheetScreenshot==='function','表スクショ保存機能が存在する');
   console.assert(typeof startBusinessDay==='function','営業開始機能が存在する');
   console.assert(normalizeTimeValue('20:17')==='20:10','時間入力は10分刻みに丸める');
   console.assert(normalizeTimeValue('03:59')==='03:50','深夜時間も10分刻みに丸める');
