@@ -1264,7 +1264,53 @@ function extensionTotal(t){return(t.items||[]).filter(i=>i.type==='extension').r
 function seat(t,end=new Date()){return baseSeat(t)+extensionTotal(t)}
 function remain(t,end=new Date()){return t.startedAt?Math.floor((t.serviceMinutes||BASIC_SET_MIN)-mins(t.startedAt,end)):0}
 function timeBadge(t,end=new Date()){if(t.status!=='busy')return 'badge';let r=remain(t,end);if(r<=0)return 'badge over';if(r<=5)return 'badge danger';if(r<=10)return 'badge warn';return 'badge busy'}
-function addExtension(id,kind,manualStartAt){let t=state.tables.find(x=>x.id===id);if(!t||t.status!=='busy')return;let isHalf=kind==='half',min=isHalf?HALF_EXTEND_MIN:FULL_EXTEND_MIN;let extStart=manualStartAt?new Date(manualStartAt):extensionStartAt(t);let chargeAt=extStart;let price=extensionPrice(kind,chargeAt,t.guests);t.serviceMinutes=(t.serviceMinutes||BASIC_SET_MIN)+min;t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});(t.jounai||[]).forEach(cid=>addJounaiCharge(t,cid,1));render()}
+function normalizeOrderPhases(t){
+  if(!t||!Array.isArray(t.items))return;
+  let phase=0;
+  t.items.forEach(item=>{
+    if(isExtensionItem(item)){
+      phase+=1;
+      if(item.orderPhase===undefined||item.orderPhase===null)item.orderPhase=phase;
+    }else if(item.orderPhase===undefined||item.orderPhase===null){
+      item.orderPhase=phase;
+    }
+  });
+}
+function currentOrderPhase(t){
+  normalizeOrderPhases(t);
+  return (t.items||[]).filter(isExtensionItem).reduce((sum,item)=>sum+(Number(item.qty)||1),0);
+}
+function itemOrderPhase(t,item){
+  normalizeOrderPhases(t);
+  return Math.max(0,Number(item&&item.orderPhase)||0);
+}
+function phaseItemAmount(item){return (Number(item&&item.price)||0)*(Number(item&&item.qty)||1)}
+function ensureOperationPhases(t){
+  if(!t)return {nominations:{},dohan:{},jounai:{},after:{}};
+  if(!t.operationPhases||typeof t.operationPhases!=='object')t.operationPhases={};
+  ['nominations','dohan','jounai','after'].forEach(key=>{if(!t.operationPhases[key]||typeof t.operationPhases[key]!=='object'||Array.isArray(t.operationPhases[key]))t.operationPhases[key]={};});
+  // 旧データは、現在ある項目を安全に初回分として復元する。場内だけは既存本数を初回→延長順に割り当てる。
+  (t.nominations||[]).forEach(cid=>{if(!Array.isArray(t.operationPhases.nominations[cid]))t.operationPhases.nominations[cid]=[0];});
+  (t.dohan||[]).forEach(cid=>{if(!Array.isArray(t.operationPhases.dohan[cid]))t.operationPhases.dohan[cid]=[0];});
+  (t.after||[]).forEach(cid=>{if(!Array.isArray(t.operationPhases.after[cid]))t.operationPhases.after[cid]=[0];});
+  jounaiCountGroups(t).forEach(g=>{if(!Array.isArray(t.operationPhases.jounai[g.id]))t.operationPhases.jounai[g.id]=Array.from({length:g.count},(_,i)=>i);});
+  return t.operationPhases;
+}
+function addOperationPhase(t,key,cid,phase=currentOrderPhase(t)){
+  const all=ensureOperationPhases(t),map=all[key]||(all[key]={});
+  if(!Array.isArray(map[cid]))map[cid]=[];
+  map[cid].push(Math.max(0,Number(phase)||0));
+}
+function removeOperationPhase(t,key,cid,qty=1){
+  const all=ensureOperationPhases(t),arr=Array.isArray(all[key]?.[cid])?all[key][cid]:[];
+  arr.splice(Math.max(0,arr.length-Math.max(1,Number(qty)||1)),Math.max(1,Number(qty)||1));
+  if(!arr.length&&all[key])delete all[key][cid];
+}
+function operationPhaseEntries(t,key,phase){
+  const map=ensureOperationPhases(t)[key]||{};
+  return Object.entries(map).map(([cid,phases])=>({cid,count:(phases||[]).filter(p=>Number(p)===Number(phase)).length})).filter(x=>x.count>0);
+}
+function addExtension(id,kind,manualStartAt){let t=state.tables.find(x=>x.id===id);if(!t||t.status!=='busy')return;normalizeOrderPhases(t);let phase=currentOrderPhase(t)+1;let isHalf=kind==='half',min=isHalf?HALF_EXTEND_MIN:FULL_EXTEND_MIN;let extStart=manualStartAt?new Date(manualStartAt):extensionStartAt(t);let chargeAt=extStart;let price=extensionPrice(kind,chargeAt,t.guests);t.serviceMinutes=(t.serviceMinutes||BASIC_SET_MIN)+min;t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,orderPhase:phase,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});(t.jounai||[]).forEach(cid=>addJounaiCharge(t,cid,1,phase));render()}
 function openExtensionAdd(tableId,kind){
   let t=state.tables.find(x=>x.id===tableId);
   if(!t||t.status!=='busy')return;
@@ -1317,10 +1363,11 @@ function ensureJounaiCounts(t){
   if(!t.jounaiCounts || Array.isArray(t.jounaiCounts)) t.jounaiCounts={};
   return t.jounaiCounts;
 }
-function addJounaiCharge(t,cid,qty=1){
+function addJounaiCharge(t,cid,qty=1,phase=currentOrderPhase(t)){
   if(!t||!cid)return;
-  let counts=ensureJounaiCounts(t);
-  counts[cid]=(Number(counts[cid])||0)+(Number(qty)||1);
+  let counts=ensureJounaiCounts(t),n=Math.max(1,Number(qty)||1);
+  counts[cid]=(Number(counts[cid])||0)+n;
+  for(let i=0;i<n;i++)addOperationPhase(t,'jounai',cid,phase);
 }
 function jounaiChargeCount(t){
   let counts=ensureJounaiCounts(t);
@@ -1619,39 +1666,45 @@ function deletePrepay(tableId,pid){
 }
 
 function details(t,c){
-  let rep=c.extensionRepeats||1,repLabel=rep>1?` ×${rep}回分`:'';
-  let nominationUnit=Number(t.nominationUnitPrice??2000)||0;
-  let baseRows=[
-    {label:'セット/延長',amount:c.seat},
-    {label:`シングル${repLabel}`,amount:c.single},
-    {label:'同伴',amount:c.dohan,opKey:'dohan',opLabel:'同伴',count:(t.dohan||[]).length},
-    {label:'アフター',amount:c.after,opKey:'after',opLabel:'アフター',count:(t.after||[]).length}
-  ].filter(x=>x.amount>0);
-  let baseHtml=baseRows.map(r=>{
-    let del=(r.opKey&&r.count>0)?`<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deleteOperationQty('${t.id}','${r.opKey}','${r.opLabel}')">数量削除</button></div>`:'';
-    return `<tr><td>${r.label}${del}</td><td class="right">${yen(r.amount)}</td></tr>`;
-  }).join('');
-  let nominationHtml=operationRowsHtml(t,'nominations','指名',nominationUnit,rep);
-  let jounaiHtml=operationRowsHtml(t,'jounai','場内',1000,rep);
-  let itemRows=(t.items||[]).filter(i=>(+i.price||0)*(+i.qty||1)>0).map(i=>{
-    let targetLabel=i.castId?'('+cname(i.castId)+')':(i.target==='guest'||i.type==='guestShot'?'(ゲスト)':'');
-    let label=`${i.name}${targetLabel} ×${i.qty}`;
-    if(i.type==='extension'){
-      let dt=new Date(extensionItemStart(i));
-      label+=`<br><span class="muted">延長開始 ${state.businessDate} ${businessClockValue(dt,state.businessDate,'floor',26)} / ${extensionRateLabelAt(dt)}${i.manualExtensionPrice?' / 料金手修正':''}</span>`;
+  normalizeOrderPhases(t);
+  ensureOperationPhases(t);
+  const nominationUnit=Number(t.nominationUnitPrice??2000)||0;
+  const phaseCount=currentOrderPhase(t);
+  let phaseHtml='';
+  for(let phase=0;phase<=phaseCount;phase++){
+    const title=phase===0?'初回':`${phase}回目延長`;
+    const phaseItems=(t.items||[]).filter(i=>itemOrderPhase(t,i)===phase && phaseItemAmount(i)>0);
+    let rows='',subtotal=0;
+    if(phase===0&&baseSeat(t)>0){let amount=baseSeat(t);subtotal+=amount;rows+=`<tr><td>セット料金 ×${Number(t.guests)||1}名</td><td class="right">${yen(amount)}</td></tr>`;}
+    if(phase>0){
+      // 延長料金は、その延長回の明細として表示する。
     }
-    let amount=(+i.price||0)*(+i.qty||1);
-    let edit=i.type==='extension'?`<button class="btn blue small" onclick="event.stopPropagation();openExtensionEdit('${t.id}','${i.id}')">延長修正</button>`:'';
-    return `<tr><td>${label}<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${edit}<button class="btn out small" onclick="event.stopPropagation();deleteOrderItem('${t.id}','${i.id}')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;
-  }).join('');
+    if((Number(t.guests)||1)===1){let amount=2000;subtotal+=amount;rows+=`<tr><td>シングルチャージ ×1</td><td class="right">${yen(amount)}</td></tr>`;}
+    // 本指名は付いた回から各セットに1本ずつ加算される。
+    const nomMap=ensureOperationPhases(t).nominations||{};
+    Object.entries(nomMap).forEach(([cid,phases])=>{
+      const first=Math.min(...(phases||[0]).map(Number));
+      if(phase>=first && (t.nominations||[]).includes(cid) && nominationUnit>0){let amount=nominationUnit;subtotal+=amount;rows+=`<tr><td>本指名 ${esc(cname(cid))} ×1</td><td class="right">${yen(amount)}</td></tr>`;}
+    });
+    operationPhaseEntries(t,'jounai',phase).forEach(x=>{let amount=1000*x.count;subtotal+=amount;rows+=`<tr><td>場内 ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
+    operationPhaseEntries(t,'dohan',phase).forEach(x=>{let amount=3000*x.count;subtotal+=amount;rows+=`<tr><td>同伴 ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
+    operationPhaseEntries(t,'after',phase).forEach(x=>{let amount=3000*x.count;subtotal+=amount;rows+=`<tr><td>アフター ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
+    phaseItems.forEach(i=>{
+      let targetLabel=i.castId?'('+cname(i.castId)+')':(i.target==='guest'||i.type==='guestShot'?'(ゲスト)':'');
+      let label=`${i.name}${targetLabel} ×${i.qty}`;
+      let amount=phaseItemAmount(i);subtotal+=amount;
+      let edit=i.type==='extension'?`<button class="btn blue small" onclick="event.stopPropagation();openExtensionEdit('${t.id}','${i.id}')">延長修正</button>`:'';
+      rows+=`<tr><td>${label}<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${edit}<button class="btn out small" onclick="event.stopPropagation();deleteOrderItem('${t.id}','${i.id}')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;
+    });
+    if(rows)phaseHtml+=`<tr class="order-phase-row"><th colspan="2">${title}</th></tr>${rows}<tr class="order-phase-subtotal"><td>${title} 小計</td><td class="right">${yen(subtotal)}</td></tr>`;
+  }
   let totalRows=[['小計',c.subtotal],['TAX',c.tax],['サービス',c.service],['カード',c.card]].filter(x=>x[1]>0);
   const baseDue=Math.round((+c.subtotal||0)+(+c.tax||0)+(+c.service||0));
   const prepays=tablePrepayments(t);
   const prepayRows=prepays.map(p=>`<tr><td>一部入金 ${p.method==='card'?'カード':'現金'}${p.memo?' / '+esc(p.memo):''}<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deletePrepay('${t.id}','${p.id}')">削除</button></div></td><td class="right">-${yen(p.amount)}${p.method==='card'?'<br><span class="muted">請求 '+yen(p.cardCharge||0)+'</span>':''}</td></tr>`).join('');
   const remain=Math.max(0,baseDue-prepayBaseTotal(t));
-  return `<table><tbody>${baseHtml}${nominationHtml}${jounaiHtml}${itemRows}${totalRows.map(r=>`<tr><td>${r[0]}</td><td class="right">${yen(r[1])}</td></tr>`).join('')}<tr><th>合計</th><th class="right">${yen(c.total)}</th></tr>${prepayRows}${prepays.length?`<tr><th>残額</th><th class="right">${yen(remain)}</th></tr>`:''}</tbody></table>`
+  return `<table><tbody>${phaseHtml}${totalRows.map(r=>`<tr><td>${r[0]}</td><td class="right">${yen(r[1])}</td></tr>`).join('')}<tr><th>合計</th><th class="right">${yen(c.total)}</th></tr>${prepayRows}${prepays.length?`<tr><th>残額</th><th class="right">${yen(remain)}</th></tr>`:''}</tbody></table>`
 }
-
 function askDeleteQty(label,maxQty){
   let max=Math.max(1,+maxQty||1);
   let raw=prompt(`${label} の削除数を入力してください（1〜${max}）`, '1');
@@ -1701,7 +1754,9 @@ function deleteOperationQty(tableId,key,label){
   let delQty=askDeleteQty(label,arr.length);
   if(!delQty)return;
   if(!confirm(`${label} を ${delQty} 件削除しますか？`))return;
+  let removed=arr.slice(Math.max(0,arr.length-delQty));
   t[key]=arr.slice(0,Math.max(0,arr.length-delQty));
+  removed.forEach(cid=>removeOperationPhase(t,key,cid,1));
   render();
 }
 
@@ -1995,25 +2050,25 @@ function findTableSafe(id){
   if(t)ensureTableItems(t);
   return t;
 }
-function simple(id,type,name,price){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,target:'guest'});render()}
-function addGuestItem(id,type,name,price,qty=1){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t);let count=Math.max(1,Number(qty)||1);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&i.target==='guest');f?f.qty=(Number(f.qty||0)+count):items.push({id:uuid(),type,name,price,qty:count,target:'guest'});closeModal('selectModal');render()}
+function simple(id,type,name,price){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,target:'guest',orderPhase:phase});render()}
+function addGuestItem(id,type,name,price,qty=1){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let count=Math.max(1,Number(qty)||1);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&i.target==='guest'&&itemOrderPhase(t,i)===phase);f?f.qty=(Number(f.qty||0)+count):items.push({id:uuid(),type,name,price,qty:count,target:'guest',orderPhase:phase});closeModal('selectModal');render()}
 function addGuestItemBulk(id,type,name,price){let qtyEl=document.getElementById('multiGuestQty');let count=Math.max(1,Number(qtyEl?qtyEl.value:1)||1);addGuestItem(id,type,name,price,count)}
-function addCastItem(id,type,name,price,cid,keepOpen=false){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t);let f=items.find(i=>i.type===type&&i.castId===cid);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,castId:cid,target:'cast'});if(!keepOpen)closeModal('selectModal');render()}
+function addCastItem(id,type,name,price,cid,keepOpen=false){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let f=items.find(i=>i.type===type&&i.castId===cid&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,castId:cid,target:'cast',orderPhase:phase});if(!keepOpen)closeModal('selectModal');render()}
 
 function toggleMultiCast(btn){btn.classList.toggle('out');btn.classList.toggle('ok')}
 function selectAllMultiCasts(){document.querySelectorAll('#multiCastPicker button[data-id]').forEach(b=>{b.classList.remove('out');b.classList.add('ok')})}
 function clearAllMultiCasts(){document.querySelectorAll('#multiCastPicker button[data-id]').forEach(b=>{b.classList.remove('ok');b.classList.add('out')})}
 function addCastItemsBulk(id,type,name,price){
   let t=findTableSafe(id);if(!t)return;
-  let items=ensureTableItems(t);
+  let items=ensureTableItems(t),phase=currentOrderPhase(t);
   let selected=[...document.querySelectorAll('#multiCastPicker .ok')].map(b=>b.dataset.id).filter(Boolean);
   let qtyEl=document.getElementById('multiCastQty');
   let count=Math.max(1,Number(qtyEl?qtyEl.value:1)||1);
   if(!selected.length){alert('キャストを選択してください');return;}
   selected.forEach(cid=>{
-    let f=items.find(i=>i.type===type&&i.castId===cid);
+    let f=items.find(i=>i.type===type&&i.castId===cid&&itemOrderPhase(t,i)===phase);
     if(f)f.qty=(Number(f.qty||0)+count);
-    else items.push({id:uuid(),type,name,price,qty:count,castId:cid,target:'cast'});
+    else items.push({id:uuid(),type,name,price,qty:count,castId:cid,target:'cast',orderPhase:phase});
   });
   closeModal('selectModal');render();
 }
@@ -2022,14 +2077,25 @@ function shot(id){selectTitle.textContent='ショット追加先';selectBody.inn
 function castShot(id){selectTitle.textContent='キャストショット';selectBody.innerHTML='<div class="grid4">'+activeCasts().map(c=>`<button class="btn" onclick="addCastItem('${id}','castShot','SB',2000,'${c.id}')">${c.name}</button>`).join('')+'</div>'}
 function wheel(id){selectTitle.textContent='テキカン';selectBody.innerHTML=`<div class="grid2"><button class="btn" onclick="wheelCasts('${id}',12,22000)">12個 ¥22,000</button><button class="btn" onclick="wheelCasts('${id}',24,40000)">24個 ¥40,000</button></div>`;openModal('selectModal')}
 function wheelCasts(id,count,price){selectTitle.textContent=`テキカン${count}`;selectBody.innerHTML=`<div class="grid4" id="wheelCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveWheel('${id}',${count},${price})">追加</button>`}
-function saveWheel(id,count,price){let t=findTableSafe(id);if(!t)return;let drinkers=[...wheelCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'wheel',name:'テキカン'+count,price,qty:1,drinkers,wheelCount:count});closeModal('selectModal');render()}
+function saveWheel(id,count,price){let t=findTableSafe(id);if(!t)return;let phase=currentOrderPhase(t),drinkers=[...wheelCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'wheel',name:'テキカン'+count,price,qty:1,drinkers,wheelCount:count,orderPhase:phase});closeModal('selectModal');render()}
 function champ(id){let cats=[...new Set(CH.map(c=>c.cat))];selectTitle.textContent='シャンパン';selectBody.innerHTML=cats.map(cat=>`<h3>${cat}</h3><div class="grid3">${CH.filter(c=>c.cat===cat).map(c=>`<button class="btn out" onclick="champCasts('${id}','${c.id}')">${c.name}<br>${yen(c.price)}</button>`).join('')}</div>`).join('');openModal('selectModal')}
 function champCasts(id,cid){let ch=CH.find(c=>c.id===cid);selectTitle.textContent=ch.name;selectBody.innerHTML=`<div class="grid4" id="champCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveChamp('${id}','${cid}')">追加</button>`}
-function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid});closeModal('selectModal');render()}
+function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let phase=currentOrderPhase(t),ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid,orderPhase:phase});closeModal('selectModal');render()}
 function ops(id){let t=state.tables.find(x=>x.id===id);selectTitle.textContent='指名/同伴/場内/アフター';selectBody.innerHTML=[['nominations','指名'],['dohan','同伴'],['jounai','場内'],['after','アフター']].map(([k,l])=>`<h3>${l}</h3><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOp('${id}','${k}','${c.id}')">${c.name}</button>`).join('')}</div>`).join('');openModal('selectModal')}
 function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);selectTitle.textContent=label+' 追加/解除';selectBody.innerHTML=`<h3>${label}</h3><p class="muted">この画面は何回でも開けます。押すたびに追加/解除します。</p><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
-function toggleOpCategory(id,k,cid,label){let t=state.tables.find(x=>x.id===id),a=t[k]||[];if(k==='jounai'){if(a.includes(cid)){t[k]=a.filter(x=>x!==cid);let counts=ensureJounaiCounts(t);delete counts[cid];}else{t[k]=[...a,cid];addJounaiCharge(t,cid,1);}}else{t[k]=a.includes(cid)?a.filter(x=>x!==cid):[...a,cid];}render();opCategory(id,k,label)}
-function toggleOp(id,k,cid){let t=state.tables.find(x=>x.id===id),a=t[k]||[];if(k==='jounai'){if(a.includes(cid)){t[k]=a.filter(x=>x!==cid);let counts=ensureJounaiCounts(t);delete counts[cid];}else{t[k]=[...a,cid];addJounaiCharge(t,cid,1);}}else{t[k]=a.includes(cid)?a.filter(x=>x!==cid):[...a,cid];}render();ops(id)}
+function toggleOperationValue(t,k,cid){
+  let a=t[k]||[],phase=currentOrderPhase(t);
+  if(k==='jounai'){
+    if(a.includes(cid)){t[k]=a.filter(x=>x!==cid);let counts=ensureJounaiCounts(t),qty=Number(counts[cid])||0;delete counts[cid];removeOperationPhase(t,'jounai',cid,qty||1);}
+    else{t[k]=[...a,cid];addJounaiCharge(t,cid,1,phase);}
+  }else if(a.includes(cid)){
+    t[k]=a.filter(x=>x!==cid);removeOperationPhase(t,k,cid,1);
+  }else{
+    t[k]=[...a,cid];addOperationPhase(t,k,cid,phase);
+  }
+}
+function toggleOpCategory(id,k,cid,label){let t=state.tables.find(x=>x.id===id);toggleOperationValue(t,k,cid);render();opCategory(id,k,label)}
+function toggleOp(id,k,cid){let t=state.tables.find(x=>x.id===id);toggleOperationValue(t,k,cid);render();ops(id)}
 function resetTable(id){if(confirm('リセットしますか？')){state.tables=state.tables.map(t=>t.id===id?emptyTable(id):t);render()}}
 
 let checkoutTarget='';
