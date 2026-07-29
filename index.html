@@ -3326,23 +3326,79 @@ async function runSafeMaintenance(){
 async function saveSheetScreenshot(id,fileBase){
   const source=document.getElementById(id);
   if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
-  if(typeof html2canvas!=='function'){
-    alert('スクショ機能の読み込みに失敗しました。インターネット接続を確認して、POSを再読み込みしてください。');return;
+
+  const button=event && event.currentTarget ? event.currentTarget : null;
+  if(button){button.disabled=true;button.dataset.oldText=button.textContent;button.textContent='保存中…';}
+
+  const clone=source.cloneNode(true);
+  clone.querySelectorAll('.no-print').forEach(x=>x.remove());
+  clone.querySelectorAll('.scroll').forEach(x=>{
+    x.style.overflow='visible';
+    x.style.width='max-content';
+    x.style.maxWidth='none';
+    x.style.height='auto';
+    x.style.maxHeight='none';
+  });
+
+  function copyComputedStyles(src,dst){
+    if(src.nodeType!==1 || dst.nodeType!==1)return;
+    const cs=getComputedStyle(src);
+    let css='';
+    for(let i=0;i<cs.length;i++){
+      const name=cs[i];
+      css+=name+':'+cs.getPropertyValue(name)+';';
+    }
+    dst.setAttribute('style',css);
+    const sc=[...src.children], dc=[...dst.children];
+    for(let i=0;i<Math.min(sc.length,dc.length);i++)copyComputedStyles(sc[i],dc[i]);
   }
-  const btns=[...source.querySelectorAll('.no-print')]; btns.forEach(x=>x.dataset.prevDisplay=x.style.display||''); btns.forEach(x=>x.style.display='none');
-  const scrolls=[...source.querySelectorAll('.scroll')]; const old=scrolls.map(x=>({x,overflow:x.style.overflow,width:x.style.width,maxWidth:x.style.maxWidth,height:x.style.height,maxHeight:x.style.maxHeight}));
-  scrolls.forEach(x=>{x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';x.style.height='auto';x.style.maxHeight='none';});
-  const prev={width:source.style.width,maxWidth:source.style.maxWidth,overflow:source.style.overflow};
-  source.style.width='max-content'; source.style.maxWidth='none'; source.style.overflow='visible';
+
   try{
+    copyComputedStyles(source,clone);
+    clone.style.position='fixed';
+    clone.style.left='-100000px';
+    clone.style.top='0';
+    clone.style.width='max-content';
+    clone.style.maxWidth='none';
+    clone.style.overflow='visible';
+    clone.style.background='#ffffff';
+    document.body.appendChild(clone);
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    const canvas=await html2canvas(source,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:Math.max(source.scrollWidth,document.documentElement.clientWidth),windowHeight:Math.max(source.scrollHeight,document.documentElement.clientHeight)});
-    const a=document.createElement('a'); a.download=safeFileName(fileBase)+'.png'; a.href=canvas.toDataURL('image/png'); document.body.appendChild(a); a.click(); a.remove();
-  }catch(e){console.error(e);alert('スクショ保存に失敗しました。表を再表示してからもう一度実行してください。');}
-  finally{
-    source.style.width=prev.width;source.style.maxWidth=prev.maxWidth;source.style.overflow=prev.overflow;
-    old.forEach(o=>{o.x.style.overflow=o.overflow;o.x.style.width=o.width;o.x.style.maxWidth=o.maxWidth;o.x.style.height=o.height;o.x.style.maxHeight=o.maxHeight;});
-    btns.forEach(x=>x.style.display=x.dataset.prevDisplay||'');
+
+    const width=Math.ceil(Math.max(clone.scrollWidth,clone.getBoundingClientRect().width));
+    const height=Math.ceil(Math.max(clone.scrollHeight,clone.getBoundingClientRect().height));
+    if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
+    if(width*height>120000000)throw new Error('表が大きすぎます。期間を短くして再実行してください。');
+
+    const xml=new XMLSerializer().serializeToString(clone);
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="background:#fff;width:${width}px;height:${height}px;overflow:visible">${xml}</div></foreignObject></svg>`;
+    const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('表の画像化に失敗しました。'));img.src=url;});
+
+    const scale=Math.min(2,Math.sqrt(50000000/(width*height))||1);
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(width*scale));
+    canvas.height=Math.max(1,Math.round(height*scale));
+    const ctx=canvas.getContext('2d');
+    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    URL.revokeObjectURL(url);
+
+    const png=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
+    const a=document.createElement('a');
+    const pngUrl=URL.createObjectURL(png);
+    a.download=safeFileName(fileBase)+'.png';
+    a.href=pngUrl;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(pngUrl),3000);
+  }catch(e){
+    console.error(e);
+    alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
+  }finally{
+    if(clone.parentNode)clone.remove();
+    if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}
   }
 }
 
