@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Chrome screenshot direct-canvas tested build 2026-07-31 -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
@@ -3323,37 +3324,82 @@ async function runSafeMaintenance(){
     alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
   }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
 }
-function copyComputedStylesForScreenshot(source, target){
-  const sourceNodes=[source,...source.querySelectorAll('*')];
-  const targetNodes=[target,...target.querySelectorAll('*')];
-  for(let i=0;i<sourceNodes.length&&i<targetNodes.length;i++){
-    const src=sourceNodes[i], dst=targetNodes[i];
-    const cs=getComputedStyle(src);
-    let css='';
-    for(let j=0;j<cs.length;j++){
-      const prop=cs[j];
-      css+=prop+':'+cs.getPropertyValue(prop)+';';
-    }
-    dst.setAttribute('style',css);
-    if(src instanceof HTMLInputElement){dst.setAttribute('value',src.value||'');}
-    if(src instanceof HTMLTextAreaElement){dst.textContent=src.value||'';}
-    if(src instanceof HTMLSelectElement){
-      const selected=src.options[src.selectedIndex];
-      if(selected){dst.innerHTML='<option selected>'+selected.textContent+'</option>';}
+function screenshotColor(value){
+  if(!value||value==='transparent'||value==='rgba(0, 0, 0, 0)')return null;
+  return value;
+}
+function screenshotPx(value,fallback=0){
+  const n=parseFloat(value);return Number.isFinite(n)?n:fallback;
+}
+function screenshotRoundRect(ctx,x,y,w,h,r){
+  r=Math.max(0,Math.min(r,w/2,h/2));ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
+}
+function screenshotDirectText(el){
+  let s='';
+  for(const node of el.childNodes){if(node.nodeType===Node.TEXT_NODE)s+=node.nodeValue||'';}
+  return s.replace(/\s+/g,' ').trim();
+}
+function screenshotWrapText(ctx,text,maxWidth){
+  if(!text)return [];
+  const chars=Array.from(text),lines=[];let line='';
+  for(const ch of chars){
+    const test=line+ch;
+    if(line&&ctx.measureText(test).width>maxWidth){lines.push(line);line=ch;}else line=test;
+  }
+  if(line)lines.push(line);return lines;
+}
+function screenshotDrawElement(ctx,el,rootRect,scale){
+  if(!(el instanceof Element))return;
+  if(el.classList.contains('no-print')||['SCRIPT','STYLE','BUTTON'].includes(el.tagName))return;
+  const cs=getComputedStyle(el);
+  if(cs.display==='none'||cs.visibility==='hidden'||parseFloat(cs.opacity||'1')===0)return;
+  const r=el.getBoundingClientRect();
+  if(r.width<=0||r.height<=0)return;
+  const x=(r.left-rootRect.left)*scale,y=(r.top-rootRect.top)*scale,w=r.width*scale,h=r.height*scale;
+  const bg=screenshotColor(cs.backgroundColor);
+  const radius=screenshotPx(cs.borderRadius)*scale;
+  if(bg){ctx.fillStyle=bg;screenshotRoundRect(ctx,x,y,w,h,radius);ctx.fill();}
+  const sides=[['Top',x,y,x+w,y],['Right',x+w,y,x+w,y+h],['Bottom',x,y+h,x+w,y+h],['Left',x,y,x,y+h]];
+  for(const [side,x1,y1,x2,y2] of sides){
+    const bw=screenshotPx(cs['border'+side+'Width'])*scale;
+    const bc=screenshotColor(cs['border'+side+'Color']);
+    if(bw>0&&bc&&cs['border'+side+'Style']!=='none'){
+      ctx.beginPath();ctx.strokeStyle=bc;ctx.lineWidth=bw;ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
     }
   }
+  const text=screenshotDirectText(el);
+  if(text){
+    const fontSize=Math.max(8,screenshotPx(cs.fontSize,14))*scale;
+    const fontWeight=cs.fontWeight||'400';
+    const fontFamily=(cs.fontFamily||'Arial, sans-serif').replace(/"/g,'');
+    ctx.font=`${fontWeight} ${fontSize}px ${fontFamily}`;
+    ctx.fillStyle=screenshotColor(cs.color)||'#111';
+    ctx.textBaseline='top';
+    const pl=screenshotPx(cs.paddingLeft)*scale,pr=screenshotPx(cs.paddingRight)*scale;
+    const pt=screenshotPx(cs.paddingTop)*scale,pb=screenshotPx(cs.paddingBottom)*scale;
+    const maxWidth=Math.max(1,w-pl-pr);
+    const lines=screenshotWrapText(ctx,text,maxWidth);
+    const lineHeight=Math.max(fontSize,screenshotPx(cs.lineHeight,fontSize/scale*1.25)*scale);
+    const totalH=lines.length*lineHeight;
+    let ty=y+pt;
+    if(cs.display==='flex'&&cs.alignItems==='center')ty=y+(h-totalH)/2;
+    else if((el.tagName==='TD'||el.tagName==='TH')&&totalH<h-pt-pb)ty=y+(h-totalH)/2;
+    for(const line of lines){
+      let tx=x+pl;
+      const tw=ctx.measureText(line).width;
+      if(cs.textAlign==='right')tx=x+w-pr-tw;
+      else if(cs.textAlign==='center')tx=x+(w-tw)/2;
+      ctx.fillText(line,tx,ty);ty+=lineHeight;
+      if(ty>y+h)break;
+    }
+  }
+  for(const child of el.children)screenshotDrawElement(ctx,child,rootRect,scale);
 }
-
-function blobToDataURL(blob){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=()=>resolve(reader.result);
-    reader.onerror=()=>reject(reader.error||new Error('画像読込に失敗しました。'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function saveSheetScreenshot(id,fileBase,button){
+function saveSheetScreenshot(id,fileBase,button){
   const source=document.getElementById(id);
   if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
   button=button||null;
@@ -3366,53 +3412,22 @@ async function saveSheetScreenshot(id,fileBase,button){
       x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';
       x.style.height='auto';x.style.maxHeight='none';
     });
-    work.style.position='fixed';work.style.left='-100000px';work.style.top='0';
-    work.style.width='max-content';work.style.maxWidth='none';work.style.height='auto';
-    work.style.maxHeight='none';work.style.overflow='visible';work.style.background='#fff';
+    Object.assign(work.style,{position:'fixed',left:'0',top:'0',zIndex:'-99999',width:'max-content',maxWidth:'none',height:'auto',maxHeight:'none',overflow:'visible',background:'#fff'});
     document.body.appendChild(work);
-    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    copyComputedStylesForScreenshot(source,work);
-    work.querySelectorAll('.no-print').forEach(x=>x.remove());
-    work.querySelectorAll('.scroll').forEach(x=>{
-      x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';
-      x.style.height='auto';x.style.maxHeight='none';
-    });
-    work.style.position='static';work.style.left='0';work.style.top='0';
-    work.style.width='max-content';work.style.maxWidth='none';work.style.height='auto';
-    work.style.maxHeight='none';work.style.overflow='visible';work.style.background='#fff';
-
-    const width=Math.ceil(Math.max(work.scrollWidth,work.getBoundingClientRect().width));
-    const height=Math.ceil(Math.max(work.scrollHeight,work.getBoundingClientRect().height));
+    const rect=work.getBoundingClientRect();
+    const width=Math.ceil(Math.max(work.scrollWidth,rect.width));
+    const height=Math.ceil(Math.max(work.scrollHeight,rect.height));
     if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
-    const maxPixels=42000000;
-    const scale=Math.max(0.6,Math.min(2,Math.sqrt(maxPixels/(width*height))||1));
-    const outW=Math.max(1,Math.floor(width*scale));
-    const outH=Math.max(1,Math.floor(height*scale));
-
-    const serialized=new XMLSerializer().serializeToString(work);
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:#fff;overflow:visible">${serialized}</div></foreignObject></svg>`;
-    const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
-    const dataUrl=await blobToDataURL(svgBlob);
-    const img=new Image();
-    await new Promise((resolve,reject)=>{
-      img.onload=resolve;
-      img.onerror=()=>reject(new Error('Chromeで画像化できませんでした。'));
-      img.src=dataUrl;
-    });
+    const maxPixels=36000000;
+    const scale=Math.max(0.75,Math.min(1.5,Math.sqrt(maxPixels/(width*height))||1));
     const canvas=document.createElement('canvas');
-    canvas.width=outW;canvas.height=outH;
-    const ctx=canvas.getContext('2d');
-    if(!ctx)throw new Error('画像保存機能を開始できませんでした。');
-    ctx.fillStyle='#fff';ctx.fillRect(0,0,outW,outH);
-    ctx.drawImage(img,0,0,outW,outH);
-    const png=await new Promise((resolve,reject)=>canvas.toBlob(
-      b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'
-    ));
-    const url=URL.createObjectURL(png);
+    canvas.width=Math.max(1,Math.ceil(width*scale));canvas.height=Math.max(1,Math.ceil(height*scale));
+    const ctx=canvas.getContext('2d');if(!ctx)throw new Error('画像保存機能を開始できませんでした。');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    screenshotDrawElement(ctx,work,rect,scale);
     const a=document.createElement('a');
-    a.href=url;a.download=safeFileName(fileBase)+'.png';a.style.display='none';
+    a.href=canvas.toDataURL('image/png');a.download=safeFileName(fileBase)+'.png';a.style.display='none';
     document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),5000);
   }catch(e){
     console.error('スクショ保存エラー',e);
     alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'ページを再読み込みしてもう一度実行してください。'));
