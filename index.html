@@ -357,7 +357,6 @@ body.viewer-mode #casts,body.viewer-mode #backup,body.viewer-mode #cloud,body.vi
 body.viewer-mode .viewer-hidden{display:none!important}
 body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mode textarea:disabled{opacity:.75;background:#f1f5f9;color:#334155}
 </style>
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -3324,25 +3323,33 @@ async function runSafeMaintenance(){
     alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
   }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
 }
-function ensureHtml2Canvas(){
-  if(typeof html2canvas==='function')return Promise.resolve();
-  const sources=[
-    'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
-    'https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js'
-  ];
+function copyComputedStylesForScreenshot(source, target){
+  const sourceNodes=[source,...source.querySelectorAll('*')];
+  const targetNodes=[target,...target.querySelectorAll('*')];
+  for(let i=0;i<sourceNodes.length&&i<targetNodes.length;i++){
+    const src=sourceNodes[i], dst=targetNodes[i];
+    const cs=getComputedStyle(src);
+    let css='';
+    for(let j=0;j<cs.length;j++){
+      const prop=cs[j];
+      css+=prop+':'+cs.getPropertyValue(prop)+';';
+    }
+    dst.setAttribute('style',css);
+    if(src instanceof HTMLInputElement){dst.setAttribute('value',src.value||'');}
+    if(src instanceof HTMLTextAreaElement){dst.textContent=src.value||'';}
+    if(src instanceof HTMLSelectElement){
+      const selected=src.options[src.selectedIndex];
+      if(selected){dst.innerHTML='<option selected>'+selected.textContent+'</option>';}
+    }
+  }
+}
+
+function blobToDataURL(blob){
   return new Promise((resolve,reject)=>{
-    let i=0;
-    const next=()=>{
-      if(typeof html2canvas==='function'){resolve();return;}
-      if(i>=sources.length){reject(new Error('スクショ用ライブラリを読み込めませんでした。Chromeをオンライン状態で再読み込みしてください。'));return;}
-      const sc=document.createElement('script');
-      sc.src=sources[i++];
-      sc.async=true;
-      sc.onload=()=>typeof html2canvas==='function'?resolve():next();
-      sc.onerror=next;
-      document.head.appendChild(sc);
-    };
-    next();
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(reader.error||new Error('画像読込に失敗しました。'));
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -3351,85 +3358,66 @@ async function saveSheetScreenshot(id,fileBase,button){
   if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
   button=button||null;
   if(button){button.disabled=true;button.dataset.oldText=button.textContent;button.textContent='保存中…';}
-
-  const clone=source.cloneNode(true);
+  let work=null;
   try{
-    await ensureHtml2Canvas();
-    clone.querySelectorAll('.no-print').forEach(x=>x.remove());
-    clone.querySelectorAll('.scroll').forEach(x=>{
-      x.style.overflow='visible';
-      x.style.width='max-content';
-      x.style.maxWidth='none';
-      x.style.height='auto';
-      x.style.maxHeight='none';
+    work=source.cloneNode(true);
+    work.querySelectorAll('.no-print').forEach(x=>x.remove());
+    work.querySelectorAll('.scroll').forEach(x=>{
+      x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';
+      x.style.height='auto';x.style.maxHeight='none';
     });
-
-    clone.style.position='fixed';
-    clone.style.left='-100000px';
-    clone.style.top='0';
-    clone.style.width='max-content';
-    clone.style.maxWidth='none';
-    clone.style.height='auto';
-    clone.style.maxHeight='none';
-    clone.style.overflow='visible';
-    clone.style.background='#ffffff';
-    clone.style.zIndex='-1';
-    document.body.appendChild(clone);
-
+    work.style.position='fixed';work.style.left='-100000px';work.style.top='0';
+    work.style.width='max-content';work.style.maxWidth='none';work.style.height='auto';
+    work.style.maxHeight='none';work.style.overflow='visible';work.style.background='#fff';
+    document.body.appendChild(work);
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    if(document.fonts&&document.fonts.ready){try{await document.fonts.ready;}catch(_){} }
-
-    const width=Math.ceil(Math.max(clone.scrollWidth,clone.getBoundingClientRect().width));
-    const height=Math.ceil(Math.max(clone.scrollHeight,clone.getBoundingClientRect().height));
-    if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
-
-    const pixelLimit=50000000;
-    const scale=Math.max(0.75,Math.min(2,Math.sqrt(pixelLimit/(width*height))||1));
-    const canvas=await html2canvas(clone,{
-      backgroundColor:'#ffffff',
-      scale,
-      useCORS:true,
-      allowTaint:false,
-      logging:false,
-      width,
-      height,
-      windowWidth:width,
-      windowHeight:height,
-      scrollX:0,
-      scrollY:0,
-      removeContainer:true,
-      onclone:(doc)=>{
-        const target=doc.body.lastElementChild;
-        if(target){target.style.left='0';target.style.top='0';target.style.position='absolute';}
-      }
+    copyComputedStylesForScreenshot(source,work);
+    work.querySelectorAll('.no-print').forEach(x=>x.remove());
+    work.querySelectorAll('.scroll').forEach(x=>{
+      x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';
+      x.style.height='auto';x.style.maxHeight='none';
     });
+    work.style.position='static';work.style.left='0';work.style.top='0';
+    work.style.width='max-content';work.style.maxWidth='none';work.style.height='auto';
+    work.style.maxHeight='none';work.style.overflow='visible';work.style.background='#fff';
 
-    const filename=safeFileName(fileBase)+'.png';
+    const width=Math.ceil(Math.max(work.scrollWidth,work.getBoundingClientRect().width));
+    const height=Math.ceil(Math.max(work.scrollHeight,work.getBoundingClientRect().height));
+    if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
+    const maxPixels=42000000;
+    const scale=Math.max(0.6,Math.min(2,Math.sqrt(maxPixels/(width*height))||1));
+    const outW=Math.max(1,Math.floor(width*scale));
+    const outH=Math.max(1,Math.floor(height*scale));
+
+    const serialized=new XMLSerializer().serializeToString(work);
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;background:#fff;overflow:visible">${serialized}</div></foreignObject></svg>`;
+    const svgBlob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    const dataUrl=await blobToDataURL(svgBlob);
+    const img=new Image();
+    await new Promise((resolve,reject)=>{
+      img.onload=resolve;
+      img.onerror=()=>reject(new Error('Chromeで画像化できませんでした。'));
+      img.src=dataUrl;
+    });
+    const canvas=document.createElement('canvas');
+    canvas.width=outW;canvas.height=outH;
+    const ctx=canvas.getContext('2d');
+    if(!ctx)throw new Error('画像保存機能を開始できませんでした。');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,outW,outH);
+    ctx.drawImage(img,0,0,outW,outH);
+    const png=await new Promise((resolve,reject)=>canvas.toBlob(
+      b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'
+    ));
+    const url=URL.createObjectURL(png);
     const a=document.createElement('a');
-    a.download=filename;
-    a.style.display='none';
-    document.body.appendChild(a);
-    try{
-      const png=await new Promise((resolve,reject)=>canvas.toBlob(
-        b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),
-        'image/png'
-      ));
-      const pngUrl=URL.createObjectURL(png);
-      a.href=pngUrl;
-      a.click();
-      setTimeout(()=>URL.revokeObjectURL(pngUrl),5000);
-    }catch(blobError){
-      const dataUrl=canvas.toDataURL('image/png');
-      if(!dataUrl||dataUrl==='data:,')throw blobError;
-      a.href=dataUrl;
-      a.click();
-    }
-    setTimeout(()=>a.remove(),0);
+    a.href=url;a.download=safeFileName(fileBase)+'.png';a.style.display='none';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
   }catch(e){
     console.error('スクショ保存エラー',e);
     alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'ページを再読み込みしてもう一度実行してください。'));
   }finally{
-    if(clone.parentNode)clone.remove();
+    if(work&&work.parentNode)work.remove();
     if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}
   }
 }
