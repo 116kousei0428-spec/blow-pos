@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Blow2nd POS v2.0 beta57 Chrome Screenshot FINAL</title>
+<title>Blow2nd POS v2.0 beta57 sync fix</title>
 <meta name="theme-color" content="#111827">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -357,7 +357,6 @@ body.viewer-mode #casts,body.viewer-mode #backup,body.viewer-mode #cloud,body.vi
 body.viewer-mode .viewer-hidden{display:none!important}
 body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mode textarea:disabled{opacity:.75;background:#f1f5f9;color:#334155}
 </style>
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -1877,7 +1876,6 @@ function receiptHtml(t,c,autoPrint=false){
   </style></head><body><div class="slip"><div class="head"><div class="tableNo">${esc(t.id)}</div><div class="meta">入卓 ${esc(startedText)}</div><div class="people">${esc(t.guests)}名様</div></div><table><tbody>${receiptRows(t,c)}</tbody></table><div class="btns"><button class="btn" onclick="window.print()">印刷</button><button class="btn out" onclick="window.close()">閉じる</button></div></div>${autoScript}
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
-<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body></html>`;
 }
 function removeReceiptPreview(){let old=document.getElementById('receiptPreviewOverlay');if(old)old.remove()}
@@ -3048,7 +3046,7 @@ function showBusinessHistory(d){
   let expenses=(state.expenses||[]).filter(x=>x.businessDate===d);
   let cashFlows=(state.cashFlows||[]).filter(x=>x.businessDate===d);
   let closings=(state.closings||[]).filter(x=>x.businessDate===d);
-  let attendance=(state.casts||[]).map(c=>{let l=getLog(c,d);return {cast:c,log:l}}).filter(x=>x.log.in||x.log.out);
+  let attendance=(state.casts||[]).map(c=>{let l=getLog(c,d);return {cast:c,log:l}}).filter(x=>x.log.in&&x.log.in!=='休み'&&!x.log.absent);
   let unpaid=sales.filter(x=>x.table&&x.table.payment==='unpaid');
   let deletedOrders=(state.orderDeleteLogs||[]).filter(x=>x.businessDate===d);
   historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><div class="row"><h3>営業日詳細 ${d}</h3><button class="btn out small" onclick="window.print()">印刷/PDF</button></div><div class="summary" style="margin-top:10px">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('支出',s.expenses)}${cardStat('純利益',s.profit)}<div class="card stat"><div class="label">利益率</div><div class="val">${pct(s.sales?s.profit/s.sales*100:0)}</div></div></div><div class="section">会計履歴</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th>人数</th><th>支払</th><th class="right">小計</th><th class="right">合計</th><th>修正</th></tr></thead><tbody>${sales.map(x=>`<tr><td>${time(new Date(x.checkoutAt))}</td><td>${x.table.id}</td><td>${x.table.guests}</td><td>${x.table.payment==='card'?'カード':x.table.payment==='unpaid'?'未収':'現金'}</td><td class="right">${yen(x.subtotal)}</td><td class="right">${yen(x.total)}</td><td>${isAdmin?`<button class="btn blue small" onclick="editPastReceipt('${x.id}')">修正</button>`:'-'}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">会計なし</td></tr>'}</tbody></table></div><div class="section">出退勤</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th class="right">時間給</th><th class="right">バック</th></tr></thead><tbody>${attendance.map(x=>`<tr><td>${x.cast.name}</td><td>${x.log.in||'-'}</td><td>${x.log.out||'-'}</td><td>${workDur(x.cast,d)}</td><td class="right">${yen(timePay(x.cast,d))}</td><td class="right">${yen(stats(x.cast.id,d).back)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">出退勤なし</td></tr>'}</tbody></table></div><div class="section">未収</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th class="right">金額</th></tr></thead><tbody>${unpaid.map(x=>`<tr><td>${time(new Date(x.checkoutAt))}</td><td>${x.table.id}</td><td class="right">${yen(x.total)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">未収なし</td></tr>'}</tbody></table></div><div class="section">支出・入出金</div><div class="scroll"><table><thead><tr><th>区分</th><th>内容</th><th class="right">金額</th></tr></thead><tbody>${expenses.map(x=>`<tr><td>支出</td><td>${x.name}</td><td class="right">${yen(x.amount)}</td></tr>`).join('')}${cashFlows.map(x=>`<tr><td>${x.type==='in'?'入金':'出金'}</td><td>${x.name}</td><td class="right">${yen(x.amount)}</td></tr>`).join('')||''}</tbody></table></div><div class="section">注文削除ログ</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th>商品</th><th class="right">単価</th><th class="right">数量</th></tr></thead><tbody>${deletedOrders.map(x=>`<tr><td>${new Date(x.at).toLocaleString()}</td><td>${x.tableId}</td><td>${x.name}</td><td class="right">${yen(x.price)}</td><td class="right">${x.qty}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">削除ログなし</td></tr>'}</tbody></table></div><div class="section">営業終了保存データ</div><div class="scroll"><table><thead><tr><th>保存時刻</th><th>稼働卓保存</th><th class="right">保存時売上</th><th class="right">保存時純利益</th></tr></thead><tbody>${((state.businessSheets||[]).filter(x=>x.businessDate===d)).map(x=>`<tr><td>${new Date(x.savedAt).toLocaleString()}</td><td>${(x.tables||[]).filter(t=>t.status==='busy').map(t=>t.id).join(', ')||'-'}</td><td class="right">${yen(x.summary?.sales||0)}</td><td class="right">${yen(x.summary?.profit||0)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">営業終了保存なし</td></tr>'}</tbody></table></div><div class="section">レジ締め履歴</div><div class="scroll"><table><thead><tr><th>保存時刻</th><th class="right">売上</th><th class="right">純利益</th><th class="right">入金</th><th class="right">出金</th></tr></thead><tbody>${closings.map(x=>`<tr><td>${new Date(x.closedAt).toLocaleString()}</td><td class="right">${yen(x.sales)}</td><td class="right">${yen(x.profit)}</td><td class="right">${yen(x.cashIn)}</td><td class="right">${yen(x.cashOut)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">レジ締め保存なし</td></tr>'}</tbody></table></div></div>`;
@@ -3124,7 +3122,7 @@ function addExpense(){let a=+exAmount.value||0;if(!a)return;state.expenses.push(
 function makeClosing(){
   let d=state.businessDate,s=daySum(d),bd=dayRevenueBreakdown(d),cd=dayCardDetails(d);
   let totals={db:0,sb:0,jounai:0,dohan:0,after:0,nom:0,wheel:0,champ:0};
-  const closingCasts=(state.casts||[]).filter(c=>!isCastHidden(c)&&!!getLog(c,d).in);
+  const closingCasts=(state.casts||[]).filter(c=>{const l=getLog(c,d);return !isCastHidden(c)&&!!l.in&&l.in!=='休み'&&!l.absent;});
   let rows=closingCasts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=getLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
   const cardRows=cd.rows.map(x=>`<tr><td>${x.table}</td><td class="right">${yen(x.base)}</td><td class="right">${yen(x.fee)}</td><td class="right">${yen(x.charge)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">カード会計なし</td></tr>';
   closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveSheetScreenshot('closingArea','締め票_'+d,this)">スクショ保存</button></div></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金売上</b><span>${yen(bd.cash)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`}
@@ -3330,26 +3328,49 @@ async function saveSheetScreenshot(id,fileBase,button){
   if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
   button=button||null;
   if(button){button.disabled=true;button.dataset.oldText=button.textContent;button.textContent='保存中…';}
-  let clone=null;
+  const clone=source.cloneNode(true);
   try{
-    clone=source.cloneNode(true);
-    clone.querySelectorAll('.no-print,button').forEach(x=>x.remove());
+    clone.querySelectorAll('.no-print').forEach(x=>x.remove());
     clone.querySelectorAll('.scroll').forEach(x=>{x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';x.style.height='auto';x.style.maxHeight='none';});
-    clone.style.position='fixed';clone.style.left='0';clone.style.top='0';clone.style.zIndex='-99999';clone.style.width='max-content';clone.style.maxWidth='none';clone.style.background='#fff';
+    clone.style.position='fixed';clone.style.left='-100000px';clone.style.top='0';clone.style.width='max-content';clone.style.maxWidth='none';clone.style.overflow='visible';clone.style.background='#fff';clone.style.zIndex='-9999';
     document.body.appendChild(clone);
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    const width=Math.ceil(Math.max(clone.scrollWidth,clone.getBoundingClientRect().width));
-    const height=Math.ceil(Math.max(clone.scrollHeight,clone.getBoundingClientRect().height));
+    const rootRect=clone.getBoundingClientRect();
+    const width=Math.ceil(Math.max(clone.scrollWidth,rootRect.width));
+    const height=Math.ceil(Math.max(clone.scrollHeight,rootRect.height));
     if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
-    const css=[...document.styleSheets].map(ss=>{try{return [...ss.cssRules].map(r=>r.cssText).join('\n')}catch(_){return ''}}).join('\n');
-    const body=new XMLSerializer().serializeToString(clone);
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${css.replace(/<\/style/gi,'<\\/style')}</style><foreignObject x="0" y="0" width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;min-height:${height}px;background:#fff">${body}</div></foreignObject></svg>`;
-    const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=safeFileName(fileBase)+'.svg';a.style.display='none';document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),30000);
-  }catch(e){console.error('スクショ保存エラー',e);alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'ページを再読み込みしてください。'));}
-  finally{if(clone&&clone.parentNode)clone.remove();if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}}
+    if(width*height>80000000)throw new Error('表が大きすぎます。期間を短くして再実行してください。');
+    const scale=Math.min(2,Math.sqrt(40000000/(width*height))||1);
+    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+    const ctx=canvas.getContext('2d');if(!ctx)throw new Error('画像作成機能を開始できませんでした。');
+    ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);
+    const transparent=v=>!v||v==='transparent'||v==='rgba(0, 0, 0, 0)';
+    const px=v=>Number.parseFloat(v)||0;
+    const relRect=el=>{const r=el.getBoundingClientRect();return {x:r.left-rootRect.left,y:r.top-rootRect.top,w:r.width,h:r.height};};
+    for(const el of [clone,...clone.querySelectorAll('*')]){
+      if(!(el instanceof HTMLElement))continue;
+      const r=relRect(el);if(r.w<=0||r.h<=0)continue;
+      const cs=getComputedStyle(el);if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0)continue;
+      if(!transparent(cs.backgroundColor)){ctx.fillStyle=cs.backgroundColor;ctx.fillRect(r.x,r.y,r.w,r.h);}
+      const sides=[['Top',r.x,r.y,r.w,px(cs.borderTopWidth)],['Bottom',r.x,r.y+r.h-px(cs.borderBottomWidth),r.w,px(cs.borderBottomWidth)],['Left',r.x,r.y,px(cs.borderLeftWidth),r.h],['Right',r.x+r.w-px(cs.borderRightWidth),r.y,px(cs.borderRightWidth),r.h]];
+      for(const [side,x,y,w,h] of sides){const bw=side==='Top'?px(cs.borderTopWidth):side==='Bottom'?px(cs.borderBottomWidth):side==='Left'?px(cs.borderLeftWidth):px(cs.borderRightWidth);if(bw>0){ctx.fillStyle=cs['border'+side+'Color'];ctx.fillRect(x,y,w,h);}}
+    }
+    const walker=document.createTreeWalker(clone,NodeFilter.SHOW_TEXT,{acceptNode:n=>n.nodeValue&&n.nodeValue.trim()?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT});
+    let node;
+    while(node=walker.nextNode()){
+      const parent=node.parentElement;if(!parent)continue;
+      const cs=getComputedStyle(parent);if(cs.visibility==='hidden'||cs.display==='none'||Number(cs.opacity)===0)continue;
+      const text=node.nodeValue.replace(/\s+/g,' ').trim();if(!text)continue;
+      const range=document.createRange();range.selectNodeContents(node);const rects=[...range.getClientRects()];if(!rects.length)continue;
+      ctx.save();const pr=relRect(parent);ctx.beginPath();ctx.rect(pr.x,pr.y,pr.w,pr.h);ctx.clip();ctx.fillStyle=cs.color||'#111';ctx.font=`${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;ctx.textBaseline='alphabetic';
+      const lineHeight=px(cs.lineHeight)||px(cs.fontSize)*1.2;const words=text.split(' ');let wi=0;
+      for(const rr of rects){const x0=rr.left-rootRect.left,y0=rr.top-rootRect.top;let line='';while(wi<words.length){const test=line?line+' '+words[wi]:words[wi];if(line&&ctx.measureText(test).width>rr.width+2)break;line=test;wi++;}if(!line&&wi<words.length)line=words[wi++];let x=x0;if(cs.textAlign==='center')x=x0+Math.max(0,(rr.width-ctx.measureText(line).width)/2);else if(cs.textAlign==='right'||cs.textAlign==='end')x=x0+Math.max(0,rr.width-ctx.measureText(line).width);const y=y0+Math.min(rr.height,lineHeight)-(lineHeight-px(cs.fontSize))/2;ctx.fillText(line,x,y);}
+      ctx.restore();
+    }
+    const png=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
+    const pngUrl=URL.createObjectURL(png);const a=document.createElement('a');a.href=pngUrl;a.download=safeFileName(fileBase)+'.png';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(pngUrl),5000);
+  }catch(e){console.error('スクショ保存エラー',e);alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));}
+  finally{if(clone.parentNode)clone.remove();if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}}
 }
 
 let __blow2ndPrintLock = false;
@@ -3458,7 +3479,6 @@ function printElement(id){
   doc.open();
   doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${printTitle}</title><style>${css}</style></head><body><div class="print-viewport"><div class="print-page"></div></div>
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
-<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body></html>`);
   doc.close();
   doc.querySelector('.print-page').appendChild(cloned);
@@ -3837,7 +3857,7 @@ function runPosSelfTests(){
   console.assert(typeof castTimePickerHtml==='function','キャスト出退勤の表示も10分刻みセレクト式');
 }
 runPosSelfTests();
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js?v=20260731-0105',{updateViaCache:'none'}).catch(()=>{});});}
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
 setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();render();setTimeout(startAutoSync,800);
 
 
@@ -3846,6 +3866,5 @@ console.assert(typeof saveManualClosingSheet==='function','締め票入力保存
 </script>
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
-<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body>
 </html>
