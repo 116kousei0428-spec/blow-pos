@@ -1,10 +1,9 @@
 <!doctype html>
-<!-- Chrome screenshot direct-canvas tested build 2026-07-31 -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Blow2nd POS v2.0 beta57 sync fix</title>
+<title>Blow2nd POS v2.0 beta57 Chrome Screenshot FINAL</title>
 <meta name="theme-color" content="#111827">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -358,6 +357,7 @@ body.viewer-mode #casts,body.viewer-mode #backup,body.viewer-mode #cloud,body.vi
 body.viewer-mode .viewer-hidden{display:none!important}
 body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mode textarea:disabled{opacity:.75;background:#f1f5f9;color:#334155}
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -1877,6 +1877,7 @@ function receiptHtml(t,c,autoPrint=false){
   </style></head><body><div class="slip"><div class="head"><div class="tableNo">${esc(t.id)}</div><div class="meta">入卓 ${esc(startedText)}</div><div class="people">${esc(t.guests)}名様</div></div><table><tbody>${receiptRows(t,c)}</tbody></table><div class="btns"><button class="btn" onclick="window.print()">印刷</button><button class="btn out" onclick="window.close()">閉じる</button></div></div>${autoScript}
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
+<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body></html>`;
 }
 function removeReceiptPreview(){let old=document.getElementById('receiptPreviewOverlay');if(old)old.remove()}
@@ -3324,117 +3325,31 @@ async function runSafeMaintenance(){
     alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
   }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
 }
-function screenshotColor(value){
-  if(!value||value==='transparent'||value==='rgba(0, 0, 0, 0)')return null;
-  return value;
-}
-function screenshotPx(value,fallback=0){
-  const n=parseFloat(value);return Number.isFinite(n)?n:fallback;
-}
-function screenshotRoundRect(ctx,x,y,w,h,r){
-  r=Math.max(0,Math.min(r,w/2,h/2));ctx.beginPath();
-  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
-  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
-  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
-  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();
-}
-function screenshotDirectText(el){
-  let s='';
-  for(const node of el.childNodes){if(node.nodeType===Node.TEXT_NODE)s+=node.nodeValue||'';}
-  return s.replace(/\s+/g,' ').trim();
-}
-function screenshotWrapText(ctx,text,maxWidth){
-  if(!text)return [];
-  const chars=Array.from(text),lines=[];let line='';
-  for(const ch of chars){
-    const test=line+ch;
-    if(line&&ctx.measureText(test).width>maxWidth){lines.push(line);line=ch;}else line=test;
-  }
-  if(line)lines.push(line);return lines;
-}
-function screenshotDrawElement(ctx,el,rootRect,scale){
-  if(!(el instanceof Element))return;
-  if(el.classList.contains('no-print')||['SCRIPT','STYLE','BUTTON'].includes(el.tagName))return;
-  const cs=getComputedStyle(el);
-  if(cs.display==='none'||cs.visibility==='hidden'||parseFloat(cs.opacity||'1')===0)return;
-  const r=el.getBoundingClientRect();
-  if(r.width<=0||r.height<=0)return;
-  const x=(r.left-rootRect.left)*scale,y=(r.top-rootRect.top)*scale,w=r.width*scale,h=r.height*scale;
-  const bg=screenshotColor(cs.backgroundColor);
-  const radius=screenshotPx(cs.borderRadius)*scale;
-  if(bg){ctx.fillStyle=bg;screenshotRoundRect(ctx,x,y,w,h,radius);ctx.fill();}
-  const sides=[['Top',x,y,x+w,y],['Right',x+w,y,x+w,y+h],['Bottom',x,y+h,x+w,y+h],['Left',x,y,x,y+h]];
-  for(const [side,x1,y1,x2,y2] of sides){
-    const bw=screenshotPx(cs['border'+side+'Width'])*scale;
-    const bc=screenshotColor(cs['border'+side+'Color']);
-    if(bw>0&&bc&&cs['border'+side+'Style']!=='none'){
-      ctx.beginPath();ctx.strokeStyle=bc;ctx.lineWidth=bw;ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
-    }
-  }
-  const text=screenshotDirectText(el);
-  if(text){
-    const fontSize=Math.max(8,screenshotPx(cs.fontSize,14))*scale;
-    const fontWeight=cs.fontWeight||'400';
-    const fontFamily=(cs.fontFamily||'Arial, sans-serif').replace(/"/g,'');
-    ctx.font=`${fontWeight} ${fontSize}px ${fontFamily}`;
-    ctx.fillStyle=screenshotColor(cs.color)||'#111';
-    ctx.textBaseline='top';
-    const pl=screenshotPx(cs.paddingLeft)*scale,pr=screenshotPx(cs.paddingRight)*scale;
-    const pt=screenshotPx(cs.paddingTop)*scale,pb=screenshotPx(cs.paddingBottom)*scale;
-    const maxWidth=Math.max(1,w-pl-pr);
-    const lines=screenshotWrapText(ctx,text,maxWidth);
-    const lineHeight=Math.max(fontSize,screenshotPx(cs.lineHeight,fontSize/scale*1.25)*scale);
-    const totalH=lines.length*lineHeight;
-    let ty=y+pt;
-    if(cs.display==='flex'&&cs.alignItems==='center')ty=y+(h-totalH)/2;
-    else if((el.tagName==='TD'||el.tagName==='TH')&&totalH<h-pt-pb)ty=y+(h-totalH)/2;
-    for(const line of lines){
-      let tx=x+pl;
-      const tw=ctx.measureText(line).width;
-      if(cs.textAlign==='right')tx=x+w-pr-tw;
-      else if(cs.textAlign==='center')tx=x+(w-tw)/2;
-      ctx.fillText(line,tx,ty);ty+=lineHeight;
-      if(ty>y+h)break;
-    }
-  }
-  for(const child of el.children)screenshotDrawElement(ctx,child,rootRect,scale);
-}
-function saveSheetScreenshot(id,fileBase,button){
+async function saveSheetScreenshot(id,fileBase,button){
   const source=document.getElementById(id);
   if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
   button=button||null;
   if(button){button.disabled=true;button.dataset.oldText=button.textContent;button.textContent='保存中…';}
-  let work=null;
+  let clone=null;
   try{
-    work=source.cloneNode(true);
-    work.querySelectorAll('.no-print').forEach(x=>x.remove());
-    work.querySelectorAll('.scroll').forEach(x=>{
-      x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';
-      x.style.height='auto';x.style.maxHeight='none';
-    });
-    Object.assign(work.style,{position:'fixed',left:'0',top:'0',zIndex:'-99999',width:'max-content',maxWidth:'none',height:'auto',maxHeight:'none',overflow:'visible',background:'#fff'});
-    document.body.appendChild(work);
-    const rect=work.getBoundingClientRect();
-    const width=Math.ceil(Math.max(work.scrollWidth,rect.width));
-    const height=Math.ceil(Math.max(work.scrollHeight,rect.height));
+    clone=source.cloneNode(true);
+    clone.querySelectorAll('.no-print,button').forEach(x=>x.remove());
+    clone.querySelectorAll('.scroll').forEach(x=>{x.style.overflow='visible';x.style.width='max-content';x.style.maxWidth='none';x.style.height='auto';x.style.maxHeight='none';});
+    clone.style.position='fixed';clone.style.left='0';clone.style.top='0';clone.style.zIndex='-99999';clone.style.width='max-content';clone.style.maxWidth='none';clone.style.background='#fff';
+    document.body.appendChild(clone);
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const width=Math.ceil(Math.max(clone.scrollWidth,clone.getBoundingClientRect().width));
+    const height=Math.ceil(Math.max(clone.scrollHeight,clone.getBoundingClientRect().height));
     if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
-    const maxPixels=36000000;
-    const scale=Math.max(0.75,Math.min(1.5,Math.sqrt(maxPixels/(width*height))||1));
-    const canvas=document.createElement('canvas');
-    canvas.width=Math.max(1,Math.ceil(width*scale));canvas.height=Math.max(1,Math.ceil(height*scale));
-    const ctx=canvas.getContext('2d');if(!ctx)throw new Error('画像保存機能を開始できませんでした。');
-    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
-    screenshotDrawElement(ctx,work,rect,scale);
-    const a=document.createElement('a');
-    a.href=canvas.toDataURL('image/png');a.download=safeFileName(fileBase)+'.png';a.style.display='none';
-    document.body.appendChild(a);a.click();a.remove();
-  }catch(e){
-    console.error('スクショ保存エラー',e);
-    alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'ページを再読み込みしてもう一度実行してください。'));
-  }finally{
-    if(work&&work.parentNode)work.remove();
-    if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}
-  }
+    const css=[...document.styleSheets].map(ss=>{try{return [...ss.cssRules].map(r=>r.cssText).join('\n')}catch(_){return ''}}).join('\n');
+    const body=new XMLSerializer().serializeToString(clone);
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>${css.replace(/<\/style/gi,'<\\/style')}</style><foreignObject x="0" y="0" width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;min-height:${height}px;background:#fff">${body}</div></foreignObject></svg>`;
+    const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=safeFileName(fileBase)+'.svg';a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),30000);
+  }catch(e){console.error('スクショ保存エラー',e);alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'ページを再読み込みしてください。'));}
+  finally{if(clone&&clone.parentNode)clone.remove();if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}}
 }
 
 let __blow2ndPrintLock = false;
@@ -3543,6 +3458,7 @@ function printElement(id){
   doc.open();
   doc.write(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${printTitle}</title><style>${css}</style></head><body><div class="print-viewport"><div class="print-page"></div></div>
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
+<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body></html>`);
   doc.close();
   doc.querySelector('.print-page').appendChild(cloned);
@@ -3921,7 +3837,7 @@ function runPosSelfTests(){
   console.assert(typeof castTimePickerHtml==='function','キャスト出退勤の表示も10分刻みセレクト式');
 }
 runPosSelfTests();
-if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js?v=20260731-0105',{updateViaCache:'none'}).catch(()=>{});});}
 setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();render();setTimeout(startAutoSync,800);
 
 
@@ -3930,5 +3846,6 @@ console.assert(typeof saveManualClosingSheet==='function','締め票入力保存
 </script>
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
+<div id="chromeScreenshotBuild" class="no-print" style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:800;opacity:.75;pointer-events:none">Chrome保存版 7/31</div>
 </body>
 </html>
