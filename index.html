@@ -3127,7 +3127,7 @@ function makeClosing(){
     if(isCastHidden(c)) return false;
     const l=getLog(c,d)||{};
     const inTime=String(l.in||'').trim();
-    return !!inTime && inTime!=='休み' && !l.absent && l.status!=='休み' && l.status!=='欠勤';
+    return !!inTime && inTime!=='休み' && !l.absent && l.status!=='休み' && l.status!=='欠勤' && workMin(c,d)>0;
   });
   let rows=closingCasts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=getLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
   const cardRows=cd.rows.map(x=>`<tr><td>${x.table}</td><td class="right">${yen(x.base)}</td><td class="right">${yen(x.fee)}</td><td class="right">${yen(x.charge)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">カード会計なし</td></tr>';
@@ -3329,31 +3329,107 @@ async function runSafeMaintenance(){
     alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
   }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
 }
-function saveClosingA4(button){
+async function saveClosingA4(button){
   const source=document.getElementById('closingArea');
   if(!source || !source.querySelector('table')){
     alert('先に締め票を表示してください。');
     return;
   }
+  if(typeof html2canvas!=='function'){
+    alert('画像保存機能を読み込めませんでした。通信を確認してページを再読み込みしてください。');
+    return;
+  }
   if(button){
     button.disabled=true;
     button.dataset.oldText=button.textContent;
-    button.textContent='横A4を準備中…';
+    button.textContent='PCへ保存中…';
   }
+
+  const clone=source.cloneNode(true);
+  clone.querySelectorAll('.no-print').forEach(x=>x.remove());
+  clone.querySelectorAll('.scroll').forEach(x=>{
+    x.style.overflow='visible';
+    x.style.width='100%';
+    x.style.maxWidth='none';
+    x.style.height='auto';
+    x.style.maxHeight='none';
+  });
+
+  const stage=document.createElement('div');
+  stage.style.position='fixed';
+  stage.style.left='-100000px';
+  stage.style.top='0';
+  stage.style.width='1400px';
+  stage.style.padding='18px';
+  stage.style.boxSizing='border-box';
+  stage.style.background='#ffffff';
+  stage.style.color='#111827';
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
+
   try{
-    // Chrome標準の印刷画面を開く。送信先「PDFに保存」でPCへ保存できる。
-    // printElement側で A4横・余白5mm・1ページ固定にしている。
-    printElement('closingArea');
+    clone.style.width='100%';
+    clone.style.maxWidth='none';
+    clone.style.margin='0';
+    clone.style.background='#ffffff';
+    clone.querySelectorAll('table').forEach(t=>{
+      t.style.width='100%';
+      t.style.tableLayout='fixed';
+      t.style.borderCollapse='collapse';
+    });
+    clone.querySelectorAll('th,td').forEach(cell=>{
+      cell.style.fontSize='10px';
+      cell.style.padding='3px 2px';
+      cell.style.lineHeight='1.15';
+      cell.style.whiteSpace='normal';
+      cell.style.wordBreak='break-word';
+    });
+    clone.querySelectorAll('.summary').forEach(x=>{
+      x.style.display='grid';
+      x.style.gridTemplateColumns='repeat(5,minmax(0,1fr))';
+      x.style.gap='5px';
+    });
+    clone.querySelectorAll('.grid4').forEach(x=>{
+      x.style.display='grid';
+      x.style.gridTemplateColumns='repeat(4,minmax(0,1fr))';
+      x.style.gap='5px';
+    });
+
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
+
+    const out=document.createElement('canvas');
+    out.width=3508;
+    out.height=2480;
+    const ctx=out.getContext('2d');
+    ctx.fillStyle='#ffffff';
+    ctx.fillRect(0,0,out.width,out.height);
+    const margin=70;
+    const fit=Math.min((out.width-margin*2)/raw.width,(out.height-margin*2)/raw.height);
+    const drawW=Math.max(1,Math.round(raw.width*fit));
+    const drawH=Math.max(1,Math.round(raw.height*fit));
+    const x=Math.round((out.width-drawW)/2);
+    const y=Math.round((out.height-drawH)/2);
+    ctx.drawImage(raw,x,y,drawW,drawH);
+
+    const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
+    const url=URL.createObjectURL(png);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=safeFileName((state.businessDate||'')+'_締め票_A4横')+'.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
   }catch(e){
     console.error(e);
-    alert('横A4保存画面を開けませんでした。\n'+(e&&e.message?e.message:''));
+    alert('締め票の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
   }finally{
-    setTimeout(()=>{
-      if(button){
-        button.disabled=false;
-        button.textContent=button.dataset.oldText||'スクショ保存（横A4）';
-      }
-    },1000);
+    stage.remove();
+    if(button){
+      button.disabled=false;
+      button.textContent=button.dataset.oldText||'スクショ保存（横A4）';
+    }
   }
 }
 
