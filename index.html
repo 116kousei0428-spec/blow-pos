@@ -722,6 +722,8 @@ state.tables=(state.tables||TABLES.map(emptyTable)).map(t=>({...emptyTable(t.id)
 state.casts=(state.casts||[]).map(c=>{let useDefaultBack=c.useDefaultBack!==false;let bs=normalizeBackSettings({...state.defaultBackSettings,...(c.backSettings||{}),hourly:c.hourly,deductionRate:c.deductionRate});return {...c,useDefaultBack,backSettings:bs,hourly:bs.hourly,deductionRate:bs.deductionRate,hidden:!!c.hidden};});
 repairActiveTableTimes();
 repairAllExtensionDurations();
+const liveJounaiRepairApplied=repairExistingLiveJounaiPhases();
+if(liveJounaiRepairApplied)setTimeout(()=>{try{save()}catch(e){}},0);
 let appUnlocked = sessionStorage.getItem('lounge_pos_app_unlocked') === '1';
 let currentRole = sessionStorage.getItem('lounge_pos_role') || 'general';
 let isAdmin = currentRole === 'admin';
@@ -901,9 +903,11 @@ async function pollCloudChanges(){
     applyingRemoteState=true;
     state=normalizeRestoreDataForLocalStorage(nextState);
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
+    const liveJounaiFixed=repairExistingLiveJounaiPhases();
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
     localStorage.setItem(KEY,JSON.stringify(stateForLocalStorage()));
     cloudHydrated=true; cloudWriteEnabled=true;
+    if(liveJounaiFixed){lastLocalStateJson='';scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));}
     const visitorCleanupApplied=applyOneTimeVisitorHistoryCleanup();
     if(visitorCleanupApplied){
       const cleanedJson=JSON.stringify(stateForLocalStorage());
@@ -1053,6 +1057,7 @@ async function cloudLoad(){
     state=normalizeRestoreDataForLocalStorage(nextState);
     repairActiveTableTimes();
     repairAllExtensionDurations();
+    repairExistingLiveJounaiPhases();
     active='A1';
     save();
     applyingRemoteState=false;
@@ -1322,6 +1327,39 @@ function repairOperationPhases(t){
   });
   Object.keys(all.jounai||{}).forEach(cid=>{if(!active.has(cid))delete all.jounai[cid];});
   Object.keys(counts).forEach(cid=>{if(!active.has(cid))delete counts[cid];});
+}
+function repairExistingLiveJounaiPhases(){
+  let changed=false;
+  (state.tables||[]).forEach(t=>{
+    if(!t||t.status!=='busy'||t.liveJounaiPhaseRepairV2)return;
+    normalizeOrderPhases(t);
+    const maxPhase=currentOrderPhase(t),active=[...new Set(t.jounai||[])];
+    const all=ensureOperationPhases(t),map=all.jounai||(all.jounai={}),counts=ensureJounaiCounts(t);
+    active.forEach(cid=>{
+      let raw=Array.isArray(map[cid])?map[cid].map(v=>Math.max(0,Math.min(maxPhase,Number(v)||0))):[];
+      let phases=[...new Set(raw)].sort((a,b)=>a-b);
+      if(maxPhase>0&&phases.length){
+        // 旧バグは後から追加した場内を [初回(0), 追加した現在セット] として保存していた。
+        // 0から途中が抜けた記録、または [0, 現在セット] の2点記録は、現在セット開始として補正する。
+        const hasGap=phases.some((v,i)=>i>0&&v!==phases[i-1]+1);
+        const suspiciousTwoPoint=phases.length===2&&phases[0]===0&&phases[1]===maxPhase;
+        if((hasGap||suspiciousTwoPoint)&&phases[0]===0){
+          const firstPositive=phases.find(v=>v>0);
+          const first=firstPositive===undefined?maxPhase:firstPositive;
+          phases=[];
+          for(let phase=first;phase<=maxPhase;phase++)phases.push(phase);
+          changed=true;
+        }
+      }
+      if(!phases.length)phases=[maxPhase];
+      map[cid]=phases;
+      counts[cid]=phases.length;
+    });
+    Object.keys(map).forEach(cid=>{if(!active.includes(cid)){delete map[cid];changed=true;}});
+    Object.keys(counts).forEach(cid=>{if(!active.includes(cid)){delete counts[cid];changed=true;}});
+    t.liveJounaiPhaseRepairV2=true;
+  });
+  return changed;
 }
 function operationPhaseEntries(t,key,phase){
   if(key==='jounai')repairOperationPhases(t);
@@ -2136,7 +2174,12 @@ function toggleOperationValue(t,k,cid){
   let a=t[k]||[],phase=currentOrderPhase(t);
   if(k==='jounai'){
     if(a.includes(cid)){t[k]=a.filter(x=>x!==cid);let counts=ensureJounaiCounts(t),qty=Number(counts[cid])||0;delete counts[cid];removeOperationPhase(t,'jounai',cid,qty||1);}
-    else{t[k]=[...a,cid];addJounaiCharge(t,cid,1,phase);}
+    else{
+      // 先に現在セットへ場内を記録してから、稼働中リストへ追加する。
+      // 逆順だと旧データ補正が新規場内を初回セット扱いしてしまう。
+      addJounaiCharge(t,cid,1,phase);
+      t[k]=[...a,cid];
+    }
   }else if(a.includes(cid)){
     t[k]=a.filter(x=>x!==cid);removeOperationPhase(t,k,cid,1);
   }else{
@@ -3914,7 +3957,7 @@ function runPosSelfTests(){
   let testTable={guests:1,nominations:['c1'],jounai:['c2'],dohan:[],after:[],items:[{type:'extension',price:3000,qty:1}],startedAt:new Date().toISOString(),payment:'cash'};
   console.assert(repeatChargeCount(testTable)===2,'延長1回で初回+延長の2回分');
   console.assert(calc(testTable).nomination===4000,'指名料金は延長ごとに加算');
-  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');let carryTest={jounai:['c9'],jounaiCounts:{c9:1},operationPhases:{nominations:{},dohan:{},jounai:{c9:[0]},after:{}},items:[{type:'extension',qty:1,orderPhase:1}]};carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','延長確定時に場内を次セットへ自動継続');carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','同じ延長セットへ二重追加しない');
+  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');let lateAdd={jounai:[],jounaiCounts:{},operationPhases:{nominations:{},dohan:{},jounai:{},after:{}},items:[{type:'extension',price:3000,qty:1,orderPhase:1}]};addJounaiCharge(lateAdd,'c7',1,1);lateAdd.jounai.push('c7');repairOperationPhases(lateAdd);console.assert(lateAdd.operationPhases.jounai.c7.join(',')==='1','後から追加した場内は初回に遡らず追加したセットから開始');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');let carryTest={jounai:['c9'],jounaiCounts:{c9:1},operationPhases:{nominations:{},dohan:{},jounai:{c9:[0]},after:{}},items:[{type:'extension',qty:1,orderPhase:1}]};carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','延長確定時に場内を次セットへ自動継続');carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','同じ延長セットへ二重追加しない');
   console.assert(calc(testTable).single===4000,'シングルチャージは延長ごとに加算');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','22:59'),'2026-05-23')===5000,'延長料金は22:59まで5000円');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','23:00'),'2026-05-23')===6000,'延長料金は23:00から6000円');
