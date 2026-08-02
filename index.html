@@ -1265,7 +1265,26 @@ function extensionChargeAt(t){return extensionStartAt(t)}
 function blocks(t,end=new Date()){return Math.max(1,Math.ceil(mins(t,end)/60))}
 function baseSeatUnit(t){if(!t.startedAt)return 0;if(t.baseSeatUnitOverride!==undefined&&t.baseSeatUnitOverride!==null&&t.baseSeatUnitOverride!=='')return Number(t.baseSeatUnitOverride)||0;if(t.baseSeatOverride!==undefined&&t.baseSeatOverride!==null&&t.baseSeatOverride!=='')return Math.round((Number(t.baseSeatOverride)||0)/(Number(t.guests)||1));let s=new Date(t.startedAt);return amamiSetRateAt(s,state.businessDate)||4000}
 function baseSeat(t){return baseSeatUnit(t)*(Number(t.guests)||1)}
-function extensionTotal(t){return(t.items||[]).filter(i=>i.type==='extension').reduce((a,i)=>a+i.price*i.qty,0)}
+function effectiveExtensionPrice(t,item){
+  if(!item||item.type!=='extension')return Number(item&&item.price)||0;
+  if(extensionItemKind(item)==='half')return 2000*(Number(t&&t.guests)||1);
+  return Number(item.price)||0;
+}
+function normalizeHalfExtensionPricesInTable(t){
+  if(!t||!Array.isArray(t.items))return false;
+  let changed=false,total=2000*(Number(t.guests)||1);
+  t.items.forEach(i=>{
+    if(i&&i.type==='extension'&&extensionItemKind(i)==='half'&&Number(i.price)!==total){i.kind='half';i.price=total;i.manualExtensionPrice=false;i.manualExtensionUnitPrice='';changed=true;}
+  });
+  return changed;
+}
+function normalizeAllHalfExtensionPrices(){
+  let changed=false;
+  (state.tables||[]).forEach(t=>{if(normalizeHalfExtensionPricesInTable(t))changed=true;});
+  (state.sales||[]).forEach(s=>{if(s&&s.table&&normalizeHalfExtensionPricesInTable(s.table))changed=true;});
+  return changed;
+}
+function extensionTotal(t){return(t.items||[]).filter(i=>i.type==='extension').reduce((a,i)=>a+effectiveExtensionPrice(t,i)*(Number(i.qty)||1),0)}
 function seat(t,end=new Date()){return baseSeat(t)+extensionTotal(t)}
 function remain(t,end=new Date()){return t.startedAt?Math.floor((t.serviceMinutes||BASIC_SET_MIN)-mins(t.startedAt,end)):0}
 function timeBadge(t,end=new Date()){if(t.status!=='busy')return 'badge';let r=remain(t,end);if(r<=0)return 'badge over';if(r<=5)return 'badge danger';if(r<=10)return 'badge warn';return 'badge busy'}
@@ -1478,7 +1497,7 @@ function openScreen(id){if(isViewer&&!['tables','overview','manage'].includes(id
 function needPass(id){target=id;passInput.value='';openModal('passModal')}
 function unlock(){if(passInput.value===PASS){closeModal('passModal');openScreen(target)}else alert('違います')}
 function openModal(id){document.getElementById(id).classList.add('show')}function closeModal(id){document.getElementById(id).classList.remove('show')}
-function render(){save();nowLabel.textContent=`営業日 ${state.businessDate} / ${state.businessOpen?'営業中':'営業終了済'} / 現在 ${time(now)}`;renderTop();renderTables();renderOverview();renderCasts();renderManage();renderVisitorCounts();renderHistory();renderSettings();renderReceiptAuditPanel();updateReceiptGrantStatus();if(document.getElementById('backup')?.classList.contains('active'))renderBackupScreen();if(document.getElementById('cloud')?.classList.contains('active'))renderCloudSync();updateBackupStatus();applyViewerVisibility()}
+function render(){normalizeAllHalfExtensionPrices();save();nowLabel.textContent=`営業日 ${state.businessDate} / ${state.businessOpen?'営業中':'営業終了済'} / 現在 ${time(now)}`;renderTop();renderTables();renderOverview();renderCasts();renderManage();renderVisitorCounts();renderHistory();renderSettings();renderReceiptAuditPanel();updateReceiptGrantStatus();if(document.getElementById('backup')?.classList.contains('active'))renderBackupScreen();if(document.getElementById('cloud')?.classList.contains('active'))renderCloudSync();updateBackupStatus();applyViewerVisibility()}
 function renderTop(){let sales=state.sales.filter(s=>s.businessDate===state.businessDate).reduce((a,s)=>a+saleBaseAmount(s),0), run=state.tables.filter(t=>t.status==='busy').reduce((a,t)=>a+checkoutBaseAmount(t,now),0);salesTop.textContent=yen(sales);runTop.textContent=yen(run)}
 
 function renderOverview(){
@@ -1778,7 +1797,7 @@ function details(t,c){
     phaseItems.forEach(i=>{
       let targetLabel=i.castId?'('+cname(i.castId)+')':(i.target==='guest'||i.type==='guestShot'?'(ゲスト)':'');
       let label=`${i.name}${targetLabel} ×${i.qty}`;
-      let amount=phaseItemAmount(i);subtotal+=amount;
+      let amount=i.type==='extension'?effectiveExtensionPrice(t,i)*(Number(i.qty)||1):phaseItemAmount(i);subtotal+=amount;
       let edit=i.type==='extension'?`<button class="btn blue small" onclick="event.stopPropagation();openExtensionEdit('${t.id}','${i.id}')">延長修正</button>`:'';
       rows+=`<tr><td>${label}<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${edit}<button class="btn out small" onclick="event.stopPropagation();deleteOrderItem('${t.id}','${i.id}')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;
     });
@@ -1876,8 +1895,9 @@ function receiptRows(t,c){
   if(setUnit>0) rows.push(receiptLine('セット料金',setUnit,guests,setUnit*guests));
   (t.items||[]).filter(i=>i.type==='extension').forEach(i=>{
     const q=Number(i.qty||1)||1;
-    const total=Number(i.price||0)*q;
-    const unitPerGuest=guests?Math.round(Number(i.price||0)/guests):Number(i.price||0);
+    const effectivePrice=effectiveExtensionPrice(t,i);
+    const total=effectivePrice*q;
+    const unitPerGuest=guests?Math.round(effectivePrice/guests):effectivePrice;
     const name=extensionItemKind(i)==='half'?'ハーフ延長':'延長料金';
     rows.push(receiptLine(name,unitPerGuest,guests*q,total));
   });
@@ -3969,6 +3989,7 @@ function runPosSelfTests(){
   console.assert(normalizeTimeValue('26:30','floor',26)==='26:00','退勤時間は26:00を上限にする');
   console.assert(extensionPrice('half',parseBusinessDT('2026-05-23','22:59'),1,'2026-05-23')===2000,'ハーフ料金は一律2000円');
   console.assert(extensionPrice('half',parseBusinessDT('2026-05-23','23:00'),1,'2026-05-23')===2000,'ハーフ料金は一律2000円');
+  let halfTwice={guests:1,items:[{type:'extension',kind:'half',name:'ハーフ延長30分',price:2000,qty:1},{type:'extension',kind:'half',name:'ハーフ延長30分',price:3500,qty:1}]};normalizeHalfExtensionPricesInTable(halfTwice);console.assert(extensionTotal(halfTwice)===4000&&halfTwice.items[1].price===2000,'2回目以降のハーフも2000円へ強制補正');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','22:59'),1,'2026-05-23')===5000,'延長開始22:59は5000円');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','23:00'),1,'2026-05-23')===6000,'延長開始23:00は6000円');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','24:30'),1,'2026-05-23')===6000,'延長開始24:30は6000円');
