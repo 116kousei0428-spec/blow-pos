@@ -3505,17 +3505,13 @@ async function saveSheetScreenshot(id,fileBase,button){
     return;
   }
   if(typeof html2canvas!=='function'){
-    alert('画像保存機能を読み込めませんでした。ページを再読み込みしてからもう一度実行してください。');
+    alert('画像保存機能を読み込めませんでした。通信を確認してページを再読み込みしてください。');
     return;
   }
 
   const isMonthly=id==='monthlyPrintArea';
-  const isWeekly=id==='weeklyPrintArea';
-  const landscape=!isMonthly;
-  const outW=landscape?3508:2480;
-  const outH=landscape?2480:3508;
-
-  button=button||null;
+  const outW=isMonthly?2480:3508;
+  const outH=isMonthly?3508:2480;
   if(button){
     button.disabled=true;
     button.dataset.oldText=button.textContent;
@@ -3523,7 +3519,7 @@ async function saveSheetScreenshot(id,fileBase,button){
   }
 
   const clone=source.cloneNode(true);
-  clone.querySelectorAll('.no-print,button,.btn').forEach(x=>x.remove());
+  clone.querySelectorAll('.no-print').forEach(x=>x.remove());
   clone.querySelectorAll('.scroll').forEach(x=>{
     x.style.overflow='visible';
     x.style.width='100%';
@@ -3536,12 +3532,11 @@ async function saveSheetScreenshot(id,fileBase,button){
   stage.style.position='fixed';
   stage.style.left='-100000px';
   stage.style.top='0';
-  stage.style.width=isMonthly?'1180px':'1680px';
-  stage.style.padding=isMonthly?'18px':'24px';
+  stage.style.width=isMonthly?'980px':'1400px';
+  stage.style.padding='18px';
   stage.style.boxSizing='border-box';
   stage.style.background='#ffffff';
   stage.style.color='#111827';
-  stage.style.fontFamily="system-ui,-apple-system,'Segoe UI',sans-serif";
   stage.appendChild(clone);
   document.body.appendChild(stage);
 
@@ -3549,44 +3544,26 @@ async function saveSheetScreenshot(id,fileBase,button){
     clone.style.width='100%';
     clone.style.maxWidth='none';
     clone.style.margin='0';
-    clone.style.padding=isMonthly?'10px':'14px';
-    clone.style.boxSizing='border-box';
     clone.style.background='#ffffff';
     clone.style.border='0';
     clone.style.boxShadow='none';
-
     clone.querySelectorAll('table').forEach(t=>{
       t.style.width='100%';
       t.style.tableLayout='fixed';
       t.style.borderCollapse='collapse';
     });
     clone.querySelectorAll('th,td').forEach(cell=>{
-      cell.style.fontSize=isMonthly?'10px':'12px';
-      cell.style.padding=isMonthly?'2px 2px':'4px 3px';
-      cell.style.lineHeight=isMonthly?'1.05':'1.15';
+      cell.style.fontSize=isMonthly?'9px':'10px';
+      cell.style.padding=isMonthly?'2px 1px':'3px 2px';
+      cell.style.lineHeight='1.15';
       cell.style.whiteSpace='normal';
       cell.style.wordBreak='break-word';
-      cell.style.border='1px solid #64748b';
-    });
-    clone.querySelectorAll('h2').forEach(x=>x.style.fontSize=isMonthly?'20px':'28px');
-    clone.querySelectorAll('.muted').forEach(x=>x.style.fontSize=isMonthly?'10px':'12px');
-    clone.querySelectorAll('.section').forEach(x=>{
-      x.style.fontSize=isMonthly?'12px':'16px';
-      x.style.margin=isMonthly?'4px 0 2px':'7px 0 4px';
-      x.style.padding=isMonthly?'2px 4px':'3px 6px';
     });
     clone.querySelectorAll('.summary').forEach(x=>{
       x.style.display='grid';
       x.style.gridTemplateColumns=isMonthly?'repeat(4,minmax(0,1fr))':'repeat(5,minmax(0,1fr))';
-      x.style.gap=isMonthly?'3px':'5px';
+      x.style.gap='5px';
     });
-    clone.querySelectorAll('.summary .card,.info').forEach(x=>{
-      x.style.padding=isMonthly?'4px':'7px';
-      x.style.minHeight='0';
-      x.style.boxShadow='none';
-    });
-    clone.querySelectorAll('.summary .label,.info b').forEach(x=>x.style.fontSize=isMonthly?'9px':'11px');
-    clone.querySelectorAll('.summary .val,.info span').forEach(x=>x.style.fontSize=isMonthly?'12px':'15px');
 
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
     const raw=await html2canvas(stage,{
@@ -3608,22 +3585,20 @@ async function saveSheetScreenshot(id,fileBase,button){
     const fit=Math.min((out.width-margin*2)/raw.width,(out.height-margin*2)/raw.height);
     const drawW=Math.max(1,Math.round(raw.width*fit));
     const drawH=Math.max(1,Math.round(raw.height*fit));
-    const x=Math.round((out.width-drawW)/2);
-    const y=Math.round((out.height-drawH)/2);
-    ctx.drawImage(raw,x,y,drawW,drawH);
+    ctx.drawImage(raw,Math.round((out.width-drawW)/2),Math.round((out.height-drawH)/2),drawW,drawH);
 
     const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
-    const pngUrl=URL.createObjectURL(png);
+    const url=URL.createObjectURL(png);
     const a=document.createElement('a');
-    a.href=pngUrl;
+    a.href=url;
     a.download=safeFileName(fileBase+(isMonthly?'_A4縦':'_A4横'))+'.png';
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(()=>URL.revokeObjectURL(pngUrl),3000);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
   }catch(e){
     console.error(e);
-    alert((isMonthly?'月間表':'週間表')+'のスクショ保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
+    alert((isMonthly?'月間表':'週間表')+'の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
   }finally{
     stage.remove();
     if(button){
