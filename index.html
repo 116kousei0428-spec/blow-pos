@@ -3252,8 +3252,8 @@ function payrollSummaryCards(c,totals,label='週間',base=state.businessDate) {
   let bonusSummaryCard = hasBonus ? cardStat(`${label}ボーナス`, bonus.totalBonus) : '';
   return `${fixed}${itemTotals}${bonusBlock}<div class="section">${label}給与まとめ</div><div class="summary" style="margin-top:10px">${cardStat('時間給合計',shownTotals.labor)}${cardStat('バック総額',shownTotals.back)}${bonusSummaryCard}${cardStat('総額',gross)}${cardStatText('控除率',(lock?lock.deductionRate:(c.deductionRate||0))+'%')}${cardStat('控除額',deduction)}${cardStat('支給額',net)}</div>${action}`
 }
-function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('weeklyPrintArea',safeFileName(c.name)+'_週間表_'+wds[0]+'_'+wds[6],this)">スクショ保存</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
-function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base),this)">スクショ保存</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
+function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('weeklyPrintArea',safeFileName(c.name)+'_週間表_'+wds[0]+'_'+wds[6],this)">スクショ保存（横A4）</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
+function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base),this)">スクショ保存（縦A4）</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
 function showWeekHistoryMonth(ym){let casts=state.casts||[];let weeks=[];let first=ym+'-01', days=monthDays(first);let used=new Set();days.forEach(d=>{let wk=weekDates(d).join('|');if(!used.has(wk)){used.add(wk);weeks.push(d)}});historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><h3>週間表履歴 ${ym}</h3><p class="muted">月跨ぎありの週間表を履歴データから再表示します。</p>${casts.map(c=>`<div class="section">${c.name}</div>${weeks.map(w=>{let totals=initWeekTotals();let rows=weekDates(w).map(d=>payrollDayRow(c,d,totals)).join('');return `<div class="card" style="margin:10px 0"><h4>${weekDates(w)[0]}〜${weekDates(w)[6]}</h4><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',w)}</div>`}).join('')}`).join('')}</div>`}
 function addCast(){let n=newCast.value.trim();if(!n)return;let base=normalizeBackSettings(state.defaultBackSettings);let custom=Number(newCastDeductionCustom.value||'');if(Number.isFinite(custom)&&custom>0)base.deductionRate=custom;let selected=Number(newCastDeduction?.value||'');if(!newCastDeductionCustom.value&&Number.isFinite(selected)&&selected>0)base.deductionRate=selected;let same=(state.casts||[]).find(c=>(c.name||'').trim()===n);if(same){if(same.hidden){if(confirm(`${n} は非表示キャストに存在します。再表示しますか？`)){same.hidden=false;same.status=same.status||'off';same.useDefaultBack=true;same.backSettings=base;same.deductionRate=base.deductionRate;same.hourly=base.hourly;newCast.value='';newCastDeductionCustom.value='';render();return;}}else{alert(`${n} は既に登録されています`);return;}}state.casts.push({id:uuid(),name:n,status:'off',hourly:base.hourly,deductionRate:base.deductionRate,useDefaultBack:true,backSettings:base,logs:{},hidden:false});newCast.value='';newCastDeductionCustom.value='';render()}
 function hideCast(id){let c=state.casts.find(x=>x.id===id);if(!c)return;if(!confirm(`${c.name} を非表示にしますか？
@@ -3500,80 +3500,136 @@ async function saveClosingA4(button){
 
 async function saveSheetScreenshot(id,fileBase,button){
   const source=document.getElementById(id);
-  if(!source){alert('スクショ対象が見つかりません。先に表を表示してください。');return;}
+  if(!source || !source.querySelector('table')){
+    alert('先に表を表示してください。');
+    return;
+  }
+  if(typeof html2canvas!=='function'){
+    alert('画像保存機能を読み込めませんでした。ページを再読み込みしてからもう一度実行してください。');
+    return;
+  }
+
+  const isMonthly=id==='monthlyPrintArea';
+  const isWeekly=id==='weeklyPrintArea';
+  const landscape=!isMonthly;
+  const outW=landscape?3508:2480;
+  const outH=landscape?2480:3508;
 
   button=button||null;
-  if(button){button.disabled=true;button.dataset.oldText=button.textContent;button.textContent='保存中…';}
+  if(button){
+    button.disabled=true;
+    button.dataset.oldText=button.textContent;
+    button.textContent='PCへ保存中…';
+  }
 
   const clone=source.cloneNode(true);
-  clone.querySelectorAll('.no-print').forEach(x=>x.remove());
+  clone.querySelectorAll('.no-print,button,.btn').forEach(x=>x.remove());
   clone.querySelectorAll('.scroll').forEach(x=>{
     x.style.overflow='visible';
-    x.style.width='max-content';
+    x.style.width='100%';
     x.style.maxWidth='none';
     x.style.height='auto';
     x.style.maxHeight='none';
   });
 
-  function copyComputedStyles(src,dst){
-    if(src.nodeType!==1 || dst.nodeType!==1)return;
-    const cs=getComputedStyle(src);
-    let css='';
-    for(let i=0;i<cs.length;i++){
-      const name=cs[i];
-      css+=name+':'+cs.getPropertyValue(name)+';';
-    }
-    dst.setAttribute('style',css);
-    const sc=[...src.children], dc=[...dst.children];
-    for(let i=0;i<Math.min(sc.length,dc.length);i++)copyComputedStyles(sc[i],dc[i]);
-  }
+  const stage=document.createElement('div');
+  stage.style.position='fixed';
+  stage.style.left='-100000px';
+  stage.style.top='0';
+  stage.style.width=isMonthly?'1180px':'1680px';
+  stage.style.padding=isMonthly?'18px':'24px';
+  stage.style.boxSizing='border-box';
+  stage.style.background='#ffffff';
+  stage.style.color='#111827';
+  stage.style.fontFamily="system-ui,-apple-system,'Segoe UI',sans-serif";
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
 
   try{
-    copyComputedStyles(source,clone);
-    clone.style.position='fixed';
-    clone.style.left='-100000px';
-    clone.style.top='0';
-    clone.style.width='max-content';
+    clone.style.width='100%';
     clone.style.maxWidth='none';
-    clone.style.overflow='visible';
+    clone.style.margin='0';
+    clone.style.padding=isMonthly?'10px':'14px';
+    clone.style.boxSizing='border-box';
     clone.style.background='#ffffff';
-    document.body.appendChild(clone);
+    clone.style.border='0';
+    clone.style.boxShadow='none';
+
+    clone.querySelectorAll('table').forEach(t=>{
+      t.style.width='100%';
+      t.style.tableLayout='fixed';
+      t.style.borderCollapse='collapse';
+    });
+    clone.querySelectorAll('th,td').forEach(cell=>{
+      cell.style.fontSize=isMonthly?'10px':'12px';
+      cell.style.padding=isMonthly?'2px 2px':'4px 3px';
+      cell.style.lineHeight=isMonthly?'1.05':'1.15';
+      cell.style.whiteSpace='normal';
+      cell.style.wordBreak='break-word';
+      cell.style.border='1px solid #64748b';
+    });
+    clone.querySelectorAll('h2').forEach(x=>x.style.fontSize=isMonthly?'20px':'28px');
+    clone.querySelectorAll('.muted').forEach(x=>x.style.fontSize=isMonthly?'10px':'12px');
+    clone.querySelectorAll('.section').forEach(x=>{
+      x.style.fontSize=isMonthly?'12px':'16px';
+      x.style.margin=isMonthly?'4px 0 2px':'7px 0 4px';
+      x.style.padding=isMonthly?'2px 4px':'3px 6px';
+    });
+    clone.querySelectorAll('.summary').forEach(x=>{
+      x.style.display='grid';
+      x.style.gridTemplateColumns=isMonthly?'repeat(4,minmax(0,1fr))':'repeat(5,minmax(0,1fr))';
+      x.style.gap=isMonthly?'3px':'5px';
+    });
+    clone.querySelectorAll('.summary .card,.info').forEach(x=>{
+      x.style.padding=isMonthly?'4px':'7px';
+      x.style.minHeight='0';
+      x.style.boxShadow='none';
+    });
+    clone.querySelectorAll('.summary .label,.info b').forEach(x=>x.style.fontSize=isMonthly?'9px':'11px');
+    clone.querySelectorAll('.summary .val,.info span').forEach(x=>x.style.fontSize=isMonthly?'12px':'15px');
+
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const raw=await html2canvas(stage,{
+      backgroundColor:'#ffffff',
+      scale:2,
+      useCORS:true,
+      logging:false,
+      windowWidth:stage.scrollWidth,
+      windowHeight:stage.scrollHeight
+    });
 
-    const width=Math.ceil(Math.max(clone.scrollWidth,clone.getBoundingClientRect().width));
-    const height=Math.ceil(Math.max(clone.scrollHeight,clone.getBoundingClientRect().height));
-    if(!width||!height)throw new Error('画像サイズを取得できませんでした。');
-    if(width*height>120000000)throw new Error('表が大きすぎます。期間を短くして再実行してください。');
+    const out=document.createElement('canvas');
+    out.width=outW;
+    out.height=outH;
+    const ctx=out.getContext('2d');
+    ctx.fillStyle='#ffffff';
+    ctx.fillRect(0,0,out.width,out.height);
+    const margin=isMonthly?55:70;
+    const fit=Math.min((out.width-margin*2)/raw.width,(out.height-margin*2)/raw.height);
+    const drawW=Math.max(1,Math.round(raw.width*fit));
+    const drawH=Math.max(1,Math.round(raw.height*fit));
+    const x=Math.round((out.width-drawW)/2);
+    const y=Math.round((out.height-drawH)/2);
+    ctx.drawImage(raw,x,y,drawW,drawH);
 
-    const xml=new XMLSerializer().serializeToString(clone);
-    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="background:#fff;width:${width}px;height:${height}px;overflow:visible">${xml}</div></foreignObject></svg>`;
-    const blob=new Blob([svg],{type:'image/svg+xml;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const img=new Image();
-    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error('表の画像化に失敗しました。'));img.src=url;});
-
-    const scale=Math.min(2,Math.sqrt(50000000/(width*height))||1);
-    const canvas=document.createElement('canvas');
-    canvas.width=Math.max(1,Math.round(width*scale));
-    canvas.height=Math.max(1,Math.round(height*scale));
-    const ctx=canvas.getContext('2d');
-    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(img,0,0,canvas.width,canvas.height);
-    URL.revokeObjectURL(url);
-
-    const png=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
-    const a=document.createElement('a');
+    const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
     const pngUrl=URL.createObjectURL(png);
-    a.download=safeFileName(fileBase)+'.png';
+    const a=document.createElement('a');
     a.href=pngUrl;
-    document.body.appendChild(a);a.click();a.remove();
+    a.download=safeFileName(fileBase+(isMonthly?'_A4縦':'_A4横'))+'.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(()=>URL.revokeObjectURL(pngUrl),3000);
   }catch(e){
     console.error(e);
-    alert('スクショ保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
+    alert((isMonthly?'月間表':'週間表')+'のスクショ保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
   }finally{
-    if(clone.parentNode)clone.remove();
-    if(button){button.disabled=false;button.textContent=button.dataset.oldText||'スクショ保存';}
+    stage.remove();
+    if(button){
+      button.disabled=false;
+      button.textContent=button.dataset.oldText||(isMonthly?'スクショ保存（縦A4）':'スクショ保存（横A4）');
+    }
   }
 }
 
