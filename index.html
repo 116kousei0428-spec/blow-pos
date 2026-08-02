@@ -3252,7 +3252,7 @@ function payrollSummaryCards(c,totals,label='週間',base=state.businessDate) {
   let bonusSummaryCard = hasBonus ? cardStat(`${label}ボーナス`, bonus.totalBonus) : '';
   return `${fixed}${itemTotals}${bonusBlock}<div class="section">${label}給与まとめ</div><div class="summary" style="margin-top:10px">${cardStat('時間給合計',shownTotals.labor)}${cardStat('バック総額',shownTotals.back)}${bonusSummaryCard}${cardStat('総額',gross)}${cardStatText('控除率',(lock?lock.deductionRate:(c.deductionRate||0))+'%')}${cardStat('控除額',deduction)}${cardStat('支給額',net)}</div>${action}`
 }
-function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('weeklyPrintArea',safeFileName(c.name)+'_週間表_'+wds[0]+'_'+wds[6],this)">スクショ保存（横A4）</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
+function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveWeeklyA4(safeFileName(c.name)+'_週間表_'+wds[0]+'_'+wds[6],this)">スクショ保存（横A4）</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
 function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base),this)">スクショ保存（縦A4）</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
 function showWeekHistoryMonth(ym){let casts=state.casts||[];let weeks=[];let first=ym+'-01', days=monthDays(first);let used=new Set();days.forEach(d=>{let wk=weekDates(d).join('|');if(!used.has(wk)){used.add(wk);weeks.push(d)}});historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><h3>週間表履歴 ${ym}</h3><p class="muted">月跨ぎありの週間表を履歴データから再表示します。</p>${casts.map(c=>`<div class="section">${c.name}</div>${weeks.map(w=>{let totals=initWeekTotals();let rows=weekDates(w).map(d=>payrollDayRow(c,d,totals)).join('');return `<div class="card" style="margin:10px 0"><h4>${weekDates(w)[0]}〜${weekDates(w)[6]}</h4><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',w)}</div>`}).join('')}`).join('')}</div>`}
 function addCast(){let n=newCast.value.trim();if(!n)return;let base=normalizeBackSettings(state.defaultBackSettings);let custom=Number(newCastDeductionCustom.value||'');if(Number.isFinite(custom)&&custom>0)base.deductionRate=custom;let selected=Number(newCastDeduction?.value||'');if(!newCastDeductionCustom.value&&Number.isFinite(selected)&&selected>0)base.deductionRate=selected;let same=(state.casts||[]).find(c=>(c.name||'').trim()===n);if(same){if(same.hidden){if(confirm(`${n} は非表示キャストに存在します。再表示しますか？`)){same.hidden=false;same.status=same.status||'off';same.useDefaultBack=true;same.backSettings=base;same.deductionRate=base.deductionRate;same.hourly=base.hourly;newCast.value='';newCastDeductionCustom.value='';render();return;}}else{alert(`${n} は既に登録されています`);return;}}state.casts.push({id:uuid(),name:n,status:'off',hourly:base.hourly,deductionRate:base.deductionRate,useDefaultBack:true,backSettings:base,logs:{},hidden:false});newCast.value='';newCastDeductionCustom.value='';render()}
@@ -3489,6 +3489,113 @@ async function saveClosingA4(button){
   }catch(e){
     console.error(e);
     alert('締め票の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
+  }finally{
+    stage.remove();
+    if(button){
+      button.disabled=false;
+      button.textContent=button.dataset.oldText||'スクショ保存（横A4）';
+    }
+  }
+}
+
+
+async function saveWeeklyA4(fileBase,button){
+  const source=document.getElementById('weeklyPrintArea');
+  if(!source || !source.querySelector('table')){
+    alert('先に週間表を表示してください。');
+    return;
+  }
+  if(typeof html2canvas!=='function'){
+    alert('画像保存機能を読み込めませんでした。通信を確認してページを再読み込みしてください。');
+    return;
+  }
+  if(button){
+    button.disabled=true;
+    button.dataset.oldText=button.textContent;
+    button.textContent='PCへ保存中…';
+  }
+
+  const clone=source.cloneNode(true);
+  clone.querySelectorAll('.no-print').forEach(x=>x.remove());
+  clone.querySelectorAll('.scroll').forEach(x=>{
+    x.style.overflow='visible';
+    x.style.width='100%';
+    x.style.maxWidth='none';
+    x.style.height='auto';
+    x.style.maxHeight='none';
+  });
+
+  const stage=document.createElement('div');
+  stage.style.position='fixed';
+  stage.style.left='-100000px';
+  stage.style.top='0';
+  stage.style.width='1400px';
+  stage.style.padding='18px';
+  stage.style.boxSizing='border-box';
+  stage.style.background='#ffffff';
+  stage.style.color='#111827';
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
+
+  try{
+    clone.style.width='100%';
+    clone.style.maxWidth='none';
+    clone.style.margin='0';
+    clone.style.background='#ffffff';
+    clone.style.border='0';
+    clone.style.boxShadow='none';
+    clone.querySelectorAll('table').forEach(t=>{
+      t.style.width='100%';
+      t.style.tableLayout='fixed';
+      t.style.borderCollapse='collapse';
+    });
+    clone.querySelectorAll('th,td').forEach(cell=>{
+      cell.style.fontSize='10px';
+      cell.style.padding='3px 2px';
+      cell.style.lineHeight='1.15';
+      cell.style.whiteSpace='normal';
+      cell.style.wordBreak='break-word';
+    });
+    clone.querySelectorAll('.summary').forEach(x=>{
+      x.style.display='grid';
+      x.style.gridTemplateColumns='repeat(5,minmax(0,1fr))';
+      x.style.gap='5px';
+    });
+    clone.querySelectorAll('.grid4').forEach(x=>{
+      x.style.display='grid';
+      x.style.gridTemplateColumns='repeat(4,minmax(0,1fr))';
+      x.style.gap='5px';
+    });
+
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
+
+    const out=document.createElement('canvas');
+    out.width=3508;
+    out.height=2480;
+    const ctx=out.getContext('2d');
+    ctx.fillStyle='#ffffff';
+    ctx.fillRect(0,0,out.width,out.height);
+    const margin=70;
+    const fit=Math.min((out.width-margin*2)/raw.width,(out.height-margin*2)/raw.height);
+    const drawW=Math.max(1,Math.round(raw.width*fit));
+    const drawH=Math.max(1,Math.round(raw.height*fit));
+    const x=Math.round((out.width-drawW)/2);
+    const y=Math.round((out.height-drawH)/2);
+    ctx.drawImage(raw,x,y,drawW,drawH);
+
+    const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
+    const url=URL.createObjectURL(png);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=safeFileName(fileBase+'_A4横')+'.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+  }catch(e){
+    console.error(e);
+    alert('週間表の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
   }finally{
     stage.remove();
     if(button){
