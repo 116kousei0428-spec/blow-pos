@@ -508,7 +508,7 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
 
 <div id="extensionAddModal" class="modal"><div class="box" style="max-width:560px">
   <div class="row"><h2 id="extensionAddTitle">延長追加</h2><button class="btn out small" onclick="closeModal('extensionAddModal')">閉じる</button></div>
-  <p class="muted">延長開始時間を設定してから延長を追加します。25:00まで延長可、時間入力は25:30まで表示できます。20:00〜20:29は2,000円 / 20:30〜21:59は3,500円 / 22:00〜ラストは4,000円、ハーフは半額です。</p>
+  <p class="muted">延長開始時間を設定してから延長を追加します。25:00まで延長可、時間入力は25:30まで表示できます。20:00〜20:29は2,000円 / 20:30〜21:59は3,500円 / 22:00〜ラストは4,000円、ハーフは一律2,000円です。</p>
   <input id="extensionAddTableId" type="hidden">
   <input id="extensionAddKind" type="hidden">
   <div class="grid3">
@@ -1260,7 +1260,7 @@ function extensionRateLabelAt(dt,businessDate=state.businessDate){
   return '22:00〜ラスト 4,000円';
 }
 function extensionStartAt(t){let started=t&&t.startedAt?new Date(t.startedAt):new Date();let service=Number(t&&t.serviceMinutes||BASIC_SET_MIN);return new Date(started.getTime()+service*60000)}
-function extensionPrice(kind,dt,guests,businessDate=state.businessDate){let base=extensionRateAt(dt,businessDate)*(Number(guests)||1);return kind==='half'?base/2:base}
+function extensionPrice(kind,dt,guests,businessDate=state.businessDate){let base=extensionRateAt(dt,businessDate)*(Number(guests)||1);return kind==='half'?2000*(Number(guests)||1):base}
 function extensionChargeAt(t){return extensionStartAt(t)}
 function blocks(t,end=new Date()){return Math.max(1,Math.ceil(mins(t,end)/60))}
 function baseSeatUnit(t){if(!t.startedAt)return 0;if(t.baseSeatUnitOverride!==undefined&&t.baseSeatUnitOverride!==null&&t.baseSeatUnitOverride!=='')return Number(t.baseSeatUnitOverride)||0;if(t.baseSeatOverride!==undefined&&t.baseSeatOverride!==null&&t.baseSeatOverride!=='')return Math.round((Number(t.baseSeatOverride)||0)/(Number(t.guests)||1));let s=new Date(t.startedAt);return amamiSetRateAt(s,state.businessDate)||4000}
@@ -3967,8 +3967,8 @@ function runPosSelfTests(){
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','25:00'),'2026-05-23')===6000,'延長料金は25:00まで6000円');
   console.assert(time10Options('26:00',26).includes('26:00'),'退勤時間は26:00まで選択可能');
   console.assert(normalizeTimeValue('26:30','floor',26)==='26:00','退勤時間は26:00を上限にする');
-  console.assert(extensionRateAt(parseBusinessDT('2026-05-23','22:59'),'2026-05-23')/2===2500,'ハーフ料金は22:59まで2500円');
-  console.assert(extensionRateAt(parseBusinessDT('2026-05-23','23:00'),'2026-05-23')/2===3000,'ハーフ料金は23:00から3000円');
+  console.assert(extensionPrice('half',parseBusinessDT('2026-05-23','22:59'),1,'2026-05-23')===2000,'ハーフ料金は一律2000円');
+  console.assert(extensionPrice('half',parseBusinessDT('2026-05-23','23:00'),1,'2026-05-23')===2000,'ハーフ料金は一律2000円');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','22:59'),1,'2026-05-23')===5000,'延長開始22:59は5000円');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','23:00'),1,'2026-05-23')===6000,'延長開始23:00は6000円');
   console.assert(extensionPrice('full',parseBusinessDT('2026-05-23','24:30'),1,'2026-05-23')===6000,'延長開始24:30は6000円');
