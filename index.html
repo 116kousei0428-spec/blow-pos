@@ -2928,7 +2928,7 @@ function timePayFromMinutes(rate,workMinutes){
   return roundPay10(pay);
 }
 function timePay(c,d){return timePayFromMinutes(wage(c,d),workMin(c,d))}
-function daySum(d){let sales=dayRevenueBreakdown(d).total,labor=0,back=0;state.casts.forEach(c=>{labor+=timePay(c,d);back+=stats(c.id,d).back});let exp=state.expenses.filter(e=>e.businessDate===d).reduce((a,e)=>a+e.amount,0);return{sales,labor,back,payroll:labor+back,expenses:exp,profit:sales-labor-back-exp}}
+function daySum(d){let sales=dayRevenueBreakdown(d).total,labor=0,back=0;state.casts.forEach(c=>{labor+=timePay(c,d);back+=stats(c.id,d).back});let exp=state.expenses.filter(e=>e.businessDate===d).reduce((a,e)=>a+e.amount,0)+Number(manualDayCloseForDate(d)?.receiptExpense||0);return{sales,labor,back,payroll:labor+back,expenses:exp,profit:sales-labor-back-exp}}
 
 function currentManageStart(){return state.manageResetAt||state.businessStartedAt||''}
 function afterCurrentManageStart(iso){
@@ -3935,11 +3935,13 @@ function updateManualBackPreview(){
 }
 function saveManualDayCloseFromForm(d){
   state.manualClosingDaySheets=state.manualClosingDaySheets||[];
-  const rec={id:uuid(),businessDate:d,totalSales:numFrom('manualTotalSales'),cashSales:numFrom('manualCashSales'),cardSales:numFrom('manualCardSales'),unpaidSales:numFrom('manualUnpaidSales'),memo:document.getElementById('manualDayMemo')?.value||'',updatedAt:new Date().toISOString()};
+  const old=manualDayCloseForDate(d)||{};
+  const rec={id:old.id||uuid(),businessDate:d,totalSales:numFrom('manualTotalSales'),cashSales:numFrom('manualCashSales'),cardSales:numFrom('manualCardSales'),unpaidSales:numFrom('manualUnpaidSales'),receiptExpense:numFrom('manualReceiptExpense'),memo:document.getElementById('manualDayMemo')?.value||'',updatedAt:new Date().toISOString()};
   state.manualClosingDaySheets=state.manualClosingDaySheets.filter(x=>x.businessDate!==d);
-  if(rec.totalSales||rec.cashSales||rec.cardSales||rec.unpaidSales||rec.memo) state.manualClosingDaySheets.push(rec);
+  if(rec.totalSales||rec.cashSales||rec.cardSales||rec.unpaidSales||rec.receiptExpense||rec.memo) state.manualClosingDaySheets.push(rec);
 }
 
+let manualClosingEditId=null;
 function manualClosingRowsForDate(d){return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));}
 function manualClosingCastOptions(selected=''){
   return (state.casts||[]).filter(c=>!isCastHidden(c)).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${c.name}</option>`).join('')||'<option value="">表示中のキャストなし</option>';
@@ -3954,14 +3956,15 @@ function openClosingSheetInput(){
   <div class="section">売上・会計</div>
   <div class="grid4">
     <div><label>営業日</label><input id="manualCloseDate" type="date" value="${d}" onchange="renderManualClosingList(this.value)"></div>
-    <div><label>売上合計</label><input id="manualTotalSales" type="number" min="0" value="${day.totalSales||0}"></div>
+    <div><label>売上合計</label><input id="manualTotalSales" type="number" min="0" value="${day.totalSales||0}" oninput="updateManualProfitPreview()"></div>
     <div><label>現金会計</label><input id="manualCashSales" type="number" min="0" value="${day.cashSales||0}"></div>
     <div><label>カード会計</label><input id="manualCardSales" type="number" min="0" value="${day.cardSales||0}"></div>
-    <div><label>未収</label><input id="manualUnpaidSales" type="number" min="0" value="${day.unpaidSales||0}"></div>
+    <div><label>未収</label><input id="manualUnpaidSales" type="number" min="0" value="${day.unpaidSales||0}" oninput="updateManualProfitPreview()"></div>
+    <div><label>領収書合計</label><input id="manualReceiptExpense" type="number" min="0" value="${day.receiptExpense||0}" oninput="updateManualProfitPreview()"></div>
     <div><label>締めメモ</label><input id="manualDayMemo" value="${day.memo||''}" placeholder="その日の締め票メモ"></div>
   </div>
   <div class="section">キャスト別</div>
-  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
+  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
   <div class="section">杯数・本数（均一バックは自動計算）</div>
   <div class="grid4">
     <div><label>DB杯数</label><input id="manualDbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDbBackPreview">¥0</b></p></div>
@@ -3979,11 +3982,47 @@ function openClosingSheetInput(){
     <div><label>その他バック</label><input id="manualOtherBack" type="number" min="0" value="0"></div>
     <div><label>メモ</label><input id="manualMemo" placeholder="締め票から入力"></div>
   </div>
-  <div class="row" style="margin-top:12px"><button class="btn ok" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
+  <div class="summary" id="manualProfitPreview" style="margin-top:12px"></div><div class="row" style="margin-top:12px"><button class="btn ok" id="manualClosingSaveButton" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" id="manualClosingCancelEdit" style="display:none" onclick="cancelManualClosingEdit()">修正をやめる</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
   openModal('selectModal');
-  setTimeout(()=>{updateManualBackPreview();renderManualClosingList(d)},20);
+  setTimeout(()=>{updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
 }
 function numFrom(id){return Number(document.getElementById(id)?.value||0)||0;}
+
+function manualCastFieldIds(){return ['manualCloseIn','manualCloseOut','manualDbQty','manualSbQty','manualJounai','manualDohan','manualAfter','manualNom','manualNomSet','manualNomSub','manualWheelCount','manualWheelBack','manualChampCount','manualChampBack','manualOtherBack','manualMemo'];}
+function resetManualCastForm(){
+  manualClosingEditId=null;
+  manualCastFieldIds().forEach(id=>{const el=document.getElementById(id);if(!el)return;el.value=(el.type==='number'?'0':'');});
+  const btn=document.getElementById('manualClosingSaveButton');if(btn)btn.textContent='締め票入力を保存';
+  const cancel=document.getElementById('manualClosingCancelEdit');if(cancel)cancel.style.display='none';
+  updateManualBackPreview();updateManualProfitPreview();
+}
+function cancelManualClosingEdit(){resetManualCastForm();}
+function manualPayrollForDate(d){
+  let labor=0,back=0;
+  (state.casts||[]).forEach(c=>{labor+=timePay(c,d);back+=stats(c.id,d).back;});
+  return {labor,back,total:labor+back};
+}
+function updateManualProfitPreview(){
+  const box=document.getElementById('manualProfitPreview');if(!box)return;
+  const d=document.getElementById('manualCloseDate')?.value||state.businessDate;
+  const total=numFrom('manualTotalSales')||numFrom('manualCashSales')+numFrom('manualCardSales')+numFrom('manualUnpaidSales');
+  const receipt=numFrom('manualReceiptExpense');
+  const pay=manualPayrollForDate(d);
+  box.innerHTML=cardStat('売上',total)+cardStat('キャスト給与',pay.total)+cardStat('領収書',receipt)+cardStat('純利益',total-pay.total-receipt);
+}
+function editManualClosingSheet(id){
+  const r=(state.manualClosingSheets||[]).find(x=>x.id===id);if(!r)return;
+  manualClosingEditId=id;
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};
+  set('manualCloseDate',r.businessDate);set('manualCloseCast',r.castId);set('manualCloseIn',r.in);set('manualCloseOut',r.out);
+  set('manualDbQty',r.dbQty||0);set('manualSbQty',r.sbQty||0);set('manualJounai',r.jounai||0);set('manualDohan',r.dohan||0);set('manualAfter',r.after||0);
+  set('manualNom',r.nom||0);set('manualNomSet',r.nomSet||0);set('manualNomSub',r.nomSub||0);set('manualWheelCount',r.wheelCount||0);set('manualWheelBack',r.wheelBack||0);
+  set('manualChampCount',r.champCount||0);set('manualChampBack',r.champBack||0);set('manualOtherBack',r.otherBack||0);set('manualMemo',r.memo||'');
+  const btn=document.getElementById('manualClosingSaveButton');if(btn)btn.textContent='修正内容を更新';
+  const cancel=document.getElementById('manualClosingCancelEdit');if(cancel)cancel.style.display='inline-block';
+  updateManualBackPreview();updateManualProfitPreview();
+}
+
 function saveManualClosingSheet(){
   const d=(document.getElementById('manualCloseDate')?.value||state.businessDate);
   const castId=document.getElementById('manualCloseCast')?.value;
@@ -4000,25 +4039,29 @@ function saveManualClosingSheet(){
   const qty={dbQty:numFrom('manualDbQty'),sbQty:numFrom('manualSbQty'),jounai:numFrom('manualJounai'),dohan:numFrom('manualDohan'),after:numFrom('manualAfter')};
   const backs=calcManualBacksFromQty(qty);
   state.manualClosingSheets=state.manualClosingSheets||[];
-  const rec={id:uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,
+  const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
+  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
     wheelCount:numFrom('manualWheelCount'),wheelBack:numFrom('manualWheelBack'),champCount:numFrom('manualChampCount'),champBack:numFrom('manualChampBack'),
     jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:numFrom('manualNom'),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
     dohan:qty.dohan,dohanBack:backs.dohanBack,after:qty.after,afterBack:backs.afterBack,otherBack:numFrom('manualOtherBack'),
-    memo:document.getElementById('manualMemo')?.value||'',createdAt:new Date().toISOString()};
-  state.manualClosingSheets.push(rec);
+    memo:document.getElementById('manualMemo')?.value||'',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  if(existing) state.manualClosingSheets=state.manualClosingSheets.map(x=>x.id===existing.id?rec:x); else state.manualClosingSheets.push(rec);
   if(inTime||outTime){cast.logs=cast.logs||{};cast.logs[d]={...(cast.logs[d]||{}),in:inTime||cast.logs[d]?.in||'',out:outTime||cast.logs[d]?.out||'',manualClosing:true};}
   save();
   render();
   selectTitle.textContent='締め票入力';
   renderManualClosingList(d);
-  alert('締め票入力を保存しました。週間表・月間表へ反映済みです。');
+  resetManualCastForm();
+  renderManualClosingList(d);
+  alert(existing?'締め票入力を修正しました。':'締め票入力を保存しました。週間表・月間表へ反映済みです。');
 }
 function renderManualClosingList(d=state.businessDate){
   const box=document.getElementById('manualClosingList'); if(!box)return;
   const day=manualDayRevenue(d);
-  const rows=manualClosingRowsForDate(d).map(r=>`<tr><td>${r.castName}</td><td>${r.in||'-'}〜${r.out||'-'}</td><td>${r.dbQty}杯 / ${yen(r.dbBack)}</td><td>${r.sbQty}杯 / ${yen(r.sbBack)}</td><td>${r.jounai} / ${yen(r.jounaiBack)}</td><td>${r.nom} / ${yen((r.nomSet||0)+(r.nomSub||0))}</td><td>${r.dohan} / ${yen(r.dohanBack)}</td><td>${yen((r.otherBack||0)+(r.wheelBack||0)+(r.champBack||0)+(r.afterBack||0))}</td><td><button class="btn bad small" onclick="deleteManualClosingSheet('${r.id}')">削除</button></td></tr>`).join('')||'<tr><td colspan="9" class="muted">締め票入力なし</td></tr>';
-  box.innerHTML=`<div class="section">${d} 締め票入力一覧</div><div class="summary">${cardStat('売上入力',day.total)}${cardStat('現金',day.cash)}${cardStat('カード',day.card)}${cardStat('未収',day.unpaid)}</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出退勤</th><th>DB</th><th>SB</th><th>場内</th><th>指名</th><th>同伴</th><th>その他</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows=manualClosingRowsForDate(d).map(r=>`<tr><td>${r.castName}</td><td>${r.in||'-'}〜${r.out||'-'}</td><td>${r.dbQty}杯 / ${yen(r.dbBack)}</td><td>${r.sbQty}杯 / ${yen(r.sbBack)}</td><td>${r.jounai} / ${yen(r.jounaiBack)}</td><td>${r.nom} / ${yen((r.nomSet||0)+(r.nomSub||0))}</td><td>${r.dohan} / ${yen(r.dohanBack)}</td><td>${yen((r.otherBack||0)+(r.wheelBack||0)+(r.champBack||0)+(r.afterBack||0))}</td><td><button class="btn blue small" onclick="editManualClosingSheet('${r.id}')">修正</button> <button class="btn bad small" onclick="deleteManualClosingSheet('${r.id}')">削除</button></td></tr>`).join('')||'<tr><td colspan="9" class="muted">締め票入力なし</td></tr>';
+  const savedDay=manualDayCloseForDate(d)||{};const pay=manualPayrollForDate(d);const receipt=Number(savedDay.receiptExpense||0);const profit=day.total-pay.total-receipt;
+  box.innerHTML=`<div class="section">${d} 締め票入力一覧</div><div class="summary">${cardStat('売上入力',day.total)}${cardStat('現金',day.cash)}${cardStat('カード',day.card)}${cardStat('未収',day.unpaid)}${cardStat('キャスト給与',pay.total)}${cardStat('領収書',receipt)}${cardStat('純利益',profit)}</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出退勤</th><th>DB</th><th>SB</th><th>場内</th><th>指名</th><th>同伴</th><th>その他</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function deleteManualClosingSheet(id){
   const rec=(state.manualClosingSheets||[]).find(x=>x.id===id);
