@@ -2903,7 +2903,7 @@ function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;le
 function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;if(c.logs)c.logs[d]={in:'',out:'',absent:false};c.status='off';render()}
 function workMin(c,d){let l=getLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){return dur(workMin(c,d))}
-function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=blocks(t.startedAt,new Date(s.checkoutAt))*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});(state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===cid).forEach(x=>{o.dbQty+=Number(x.dbQty||0);o.dbBack+=Number(x.dbBack||0);o.sbQty+=Number(x.sbQty||0);o.sbBack+=Number(x.sbBack||0);o.wheelCount+=Number(x.wheelCount||0);o.wheelBack+=Number(x.wheelBack||0);o.champCount+=Number(x.champCount||0);o.champBack+=Number(x.champBack||0);o.jounai+=Number(x.jounai||0);o.jounaiBack+=Number(x.jounaiBack||0);o.nom+=Number(x.nom||0);o.nomSet+=Number(x.nomSet||0);o.nomSub+=Number(x.nomSub||0);o.dohan+=Number(x.dohan||0);o.dohanBack+=Number(x.dohanBack||0);o.after+=Number(x.after||0);o.afterBack+=Number(x.afterBack||0);o.otherBack+=Number(x.otherBack||0);});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
+function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=blocks(t.startedAt,new Date(s.checkoutAt))*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});(state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
 function wage(c,d){let s=stats(c.id,d),bs=castBackSettings(c),has=s.nom||s.dohan,af=s.after,base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
 function tenMinuteWageUnit(rate){
   const map={2000:340,2500:420,2700:450,2800:470,3000:500};
@@ -3874,10 +3874,19 @@ function calcManualBacksFromQty(v){
   };
 }
 function manualDayCloseForDate(d){return (state.manualClosingDaySheets||[]).find(x=>x.businessDate===d)||null;}
+function operationalRevenueForDate(d){
+  const parts=(state.sales||[]).filter(x=>x.businessDate===d).map(salePaymentBaseBreakdown);
+  const cash=parts.reduce((a,x)=>a+x.cash,0),card=parts.reduce((a,x)=>a+x.card,0),unpaid=parts.reduce((a,x)=>a+x.unpaid,0);
+  return {total:cash+card+unpaid,cash,card,unpaid};
+}
 function manualDayRevenue(d){
   const x=manualDayCloseForDate(d)||{};
   const cash=Number(x.cashSales||0)||0, card=Number(x.cardSales||0)||0, unpaid=Number(x.unpaidSales||0)||0;
   const total=Number(x.totalSales||0)||cash+card+unpaid;
+  if(x.linkedBase){
+    const b=x.linkedBase;
+    return {total:total-Number(b.total||0),cash:cash-Number(b.cash||0),card:card-Number(b.card||0),unpaid:unpaid-Number(b.unpaid||0),memo:x.memo||''};
+  }
   return {total,cash,card,unpaid,memo:x.memo||''};
 }
 function saleBaseAmount(x){
@@ -3936,7 +3945,8 @@ function updateManualBackPreview(){
 function saveManualDayCloseFromForm(d){
   state.manualClosingDaySheets=state.manualClosingDaySheets||[];
   const old=manualDayCloseForDate(d)||{};
-  const rec={id:old.id||uuid(),businessDate:d,totalSales:numFrom('manualTotalSales'),cashSales:numFrom('manualCashSales'),cardSales:numFrom('manualCardSales'),unpaidSales:numFrom('manualUnpaidSales'),receiptExpense:numFrom('manualReceiptExpense'),memo:document.getElementById('manualDayMemo')?.value||'',updatedAt:new Date().toISOString()};
+  const base=old.linkedBase||operationalRevenueForDate(d);
+  const rec={id:old.id||uuid(),businessDate:d,totalSales:numFrom('manualTotalSales'),cashSales:numFrom('manualCashSales'),cardSales:numFrom('manualCardSales'),unpaidSales:numFrom('manualUnpaidSales'),receiptExpense:numFrom('manualReceiptExpense'),memo:document.getElementById('manualDayMemo')?.value||'',linkedBase:base,updatedAt:new Date().toISOString()};
   state.manualClosingDaySheets=state.manualClosingDaySheets.filter(x=>x.businessDate!==d);
   if(rec.totalSales||rec.cashSales||rec.cardSales||rec.unpaidSales||rec.receiptExpense||rec.memo) state.manualClosingDaySheets.push(rec);
 }
@@ -3946,16 +3956,40 @@ function manualClosingRowsForDate(d){return (state.manualClosingSheets||[]).filt
 function manualClosingCastOptions(selected=''){
   return (state.casts||[]).filter(c=>!isCastHidden(c)).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${c.name}</option>`).join('')||'<option value="">表示中のキャストなし</option>';
 }
+function operationalStatsForCast(cid,d){
+  const old=state.manualClosingSheets;
+  try{state.manualClosingSheets=[];return stats(cid,d)}finally{state.manualClosingSheets=old}
+}
+function operationalCastSnapshot(c,d){
+  const st=operationalStatsForCast(c.id,d),l=getLog(c,d)||{};
+  return {in:l.in||'',out:l.out||'',dbQty:st.dbQty||0,dbBack:st.dbBack||0,sbQty:st.sbQty||0,sbBack:st.sbBack||0,jounai:st.jounai||0,jounaiBack:st.jounaiBack||0,nom:st.nom||0,nomSet:st.nomSet||0,nomSub:st.nomSub||0,dohan:st.dohan||0,dohanBack:st.dohanBack||0,after:st.after||0,afterBack:st.afterBack||0,wheelCount:st.wheelCount||0,wheelBack:st.wheelBack||0,champCount:st.champCount||0,champBack:st.champBack||0,otherBack:0};
+}
+function manualClosingFormDay(d){
+  const saved=manualDayCloseForDate(d),op=operationalRevenueForDate(d);
+  return saved?{totalSales:saved.totalSales||0,cashSales:saved.cashSales||0,cardSales:saved.cardSales||0,unpaidSales:saved.unpaidSales||0,receiptExpense:saved.receiptExpense||0,memo:saved.memo||''}:{totalSales:op.total,cashSales:op.cash,cardSales:op.card,unpaidSales:op.unpaid,receiptExpense:0,memo:''};
+}
+function loadManualClosingDate(d){
+  const day=manualClosingFormDay(d),set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};
+  set('manualTotalSales',day.totalSales);set('manualCashSales',day.cashSales);set('manualCardSales',day.cardSales);set('manualUnpaidSales',day.unpaidSales);set('manualReceiptExpense',day.receiptExpense);set('manualDayMemo',day.memo);
+  resetManualCastForm();loadOperationalCastIntoForm();updateManualProfitPreview();renderManualClosingList(d);
+}
+function loadOperationalCastIntoForm(){
+  if(manualClosingEditId)return;
+  const d=document.getElementById('manualCloseDate')?.value||state.businessDate,cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid);if(!c)return;
+  const x=operationalCastSnapshot(c,d),set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??0};
+  set('manualCloseIn',x.in);set('manualCloseOut',x.out);set('manualDbQty',x.dbQty);set('manualSbQty',x.sbQty);set('manualJounai',x.jounai);set('manualDohan',x.dohan);set('manualAfter',x.after);set('manualNom',x.nom);set('manualNomSet',x.nomSet);set('manualNomSub',x.nomSub);set('manualWheelCount',x.wheelCount);set('manualWheelBack',x.wheelBack);set('manualChampCount',x.champCount);set('manualChampBack',x.champBack);set('manualOtherBack',0);set('manualMemo','営業画面から自動取得');
+  updateManualBackPreview();updateManualProfitPreview();
+}
 function openClosingSheetInput(){
   state.manualClosingSheets=state.manualClosingSheets||[];
   state.manualClosingDaySheets=state.manualClosingDaySheets||[];
   selectTitle.textContent='締め票入力';
   const d=state.businessDate;
-  const day=manualDayCloseForDate(d)||{};
-  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><p class="muted">その日の締め票情報だけを入力します。卓営業は再現しません。保存すると週間表・月間表・締め票・利益率へ反映されます。</p>
+  const day=manualClosingFormDay(d);
+  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><p class="muted">営業画面の売上・出退勤・各バックを自動取得します。領収書と必要な修正だけ入力してください。締め票側の修正は営業伝票を変更しません。</p>
   <div class="section">売上・会計</div>
   <div class="grid4">
-    <div><label>営業日</label><input id="manualCloseDate" type="date" value="${d}" onchange="renderManualClosingList(this.value)"></div>
+    <div><label>営業日</label><input id="manualCloseDate" type="date" value="${d}" onchange="loadManualClosingDate(this.value)"></div>
     <div><label>売上合計</label><input id="manualTotalSales" type="number" min="0" value="${day.totalSales||0}" oninput="updateManualProfitPreview()"></div>
     <div><label>現金会計</label><input id="manualCashSales" type="number" min="0" value="${day.cashSales||0}"></div>
     <div><label>カード会計</label><input id="manualCardSales" type="number" min="0" value="${day.cardSales||0}"></div>
@@ -3964,7 +3998,7 @@ function openClosingSheetInput(){
     <div><label>締めメモ</label><input id="manualDayMemo" value="${day.memo||''}" placeholder="その日の締め票メモ"></div>
   </div>
   <div class="section">キャスト別</div>
-  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
+  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm();loadOperationalCastIntoForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
   <div class="section">杯数・本数（均一バックは自動計算）</div>
   <div class="grid4">
     <div><label>DB杯数</label><input id="manualDbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDbBackPreview">¥0</b></p></div>
@@ -3984,7 +4018,7 @@ function openClosingSheetInput(){
   </div>
   <div class="summary" id="manualProfitPreview" style="margin-top:12px"></div><div class="row" style="margin-top:12px"><button class="btn ok" id="manualClosingSaveButton" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" id="manualClosingCancelEdit" style="display:none" onclick="cancelManualClosingEdit()">修正をやめる</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
   openModal('selectModal');
-  setTimeout(()=>{updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
+  setTimeout(()=>{loadOperationalCastIntoForm();updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
 }
 function numFrom(id){return Number(document.getElementById(id)?.value||0)||0;}
 
@@ -4040,19 +4074,21 @@ function saveManualClosingSheet(){
   const backs=calcManualBacksFromQty(qty);
   state.manualClosingSheets=state.manualClosingSheets||[];
   const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
-  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,
+  const linkedBase=existing?.linkedBase||operationalCastSnapshot(cast,d);
+  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,linkedBase,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
     wheelCount:numFrom('manualWheelCount'),wheelBack:numFrom('manualWheelBack'),champCount:numFrom('manualChampCount'),champBack:numFrom('manualChampBack'),
     jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:numFrom('manualNom'),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
     dohan:qty.dohan,dohanBack:backs.dohanBack,after:qty.after,afterBack:backs.afterBack,otherBack:numFrom('manualOtherBack'),
     memo:document.getElementById('manualMemo')?.value||'',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
   if(existing) state.manualClosingSheets=state.manualClosingSheets.map(x=>x.id===existing.id?rec:x); else state.manualClosingSheets.push(rec);
-  if(inTime||outTime){cast.logs=cast.logs||{};cast.logs[d]={...(cast.logs[d]||{}),in:inTime||cast.logs[d]?.in||'',out:outTime||cast.logs[d]?.out||'',manualClosing:true};}
+  if((inTime||outTime)&&!rec.linkedBase){cast.logs=cast.logs||{};cast.logs[d]={...(cast.logs[d]||{}),in:inTime||cast.logs[d]?.in||'',out:outTime||cast.logs[d]?.out||'',manualClosing:true};}
   save();
   render();
   selectTitle.textContent='締め票入力';
   renderManualClosingList(d);
   resetManualCastForm();
+  loadOperationalCastIntoForm();
   renderManualClosingList(d);
   alert(existing?'締め票入力を修正しました。':'締め票入力を保存しました。週間表・月間表へ反映済みです。');
 }
@@ -4255,6 +4291,7 @@ setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);appl
 
 console.assert(typeof openClosingSheetInput==='function','締め票入力画面が存在する');
 console.assert(typeof saveManualClosingSheet==='function','締め票入力保存関数が存在する');
+console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→締め票入力連携が存在する');
 </script>
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
