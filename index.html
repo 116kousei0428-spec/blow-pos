@@ -4046,9 +4046,14 @@ function resetManualCastForm(){
 }
 function cancelManualClosingEdit(){resetManualCastForm();}
 function manualPayrollForDate(d){
-  let labor=0,back=0;
-  (state.casts||[]).forEach(c=>{labor+=timePay(c,d);back+=stats(c.id,d).back;});
-  return {labor,back,total:labor+back};
+  let labor=0,back=0,total=0;
+  manualClosingRowsForDate(d).forEach(r=>{
+    const p=manualRowPayroll(r);
+    labor+=Number(p.timePay||0);
+    back+=Number(p.back||0);
+    total+=Number(p.total||0);
+  });
+  return {labor,back,total};
 }
 function updateManualProfitPreview(){
   const box=document.getElementById('manualProfitPreview');if(!box)return;
