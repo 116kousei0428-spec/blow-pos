@@ -3952,6 +3952,7 @@ function saveManualDayCloseFromForm(d){
 }
 
 let manualClosingEditId=null;
+let manualClosingHourlyTouched=false;
 function manualClosingRowsForDate(d){return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));}
 function manualClosingCastOptions(selected=''){
   return (state.casts||[]).filter(c=>!isCastHidden(c)).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${c.name}</option>`).join('')||'<option value="">表示中のキャストなし</option>';
@@ -3973,12 +3974,26 @@ function loadManualClosingDate(d){
   set('manualTotalSales',day.totalSales);set('manualCashSales',day.cashSales);set('manualCardSales',day.cardSales);set('manualUnpaidSales',day.unpaidSales);set('manualReceiptExpense',day.receiptExpense);set('manualDayMemo',day.memo);
   resetManualCastForm();loadOperationalCastIntoForm();updateManualProfitPreview();renderManualClosingList(d);
 }
+function manualAutoHourlyFromForm(c){
+  const bs=castBackSettings(c||{}),base=Number(bs.hourly||2500);
+  const has=!!(numFrom('manualNomSet')>0||numFrom('manualNomSub')>0||numFrom('manualDohan')>0);
+  const af=!!(numFrom('manualAfter')>0);
+  if(has&&af)return base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));
+  if(has)return base+(bs.raiseNomDohan||0);
+  if(af)return base+(bs.raiseAfter||0);
+  return base;
+}
+function syncManualHourlyAuto(){
+  if(manualClosingHourlyTouched)return;
+  const cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid),el=document.getElementById('manualHourly');
+  if(c&&el)el.value=manualAutoHourlyFromForm(c);
+}
 function loadOperationalCastIntoForm(){
   if(manualClosingEditId)return;
   const d=document.getElementById('manualCloseDate')?.value||state.businessDate,cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid);if(!c)return;
   const x=operationalCastSnapshot(c,d),set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??0};
   set('manualCloseIn',x.in);set('manualCloseOut',x.out);set('manualDbQty',x.dbQty);set('manualSbQty',x.sbQty);set('manualJounai',x.jounai);set('manualDohan',x.dohan);set('manualAfter',x.after);set('manualNomSet',x.nomSet);set('manualNomSub',x.nomSub);set('manualWheelBack',x.wheelBack);set('manualChampBack',x.champBack);set('manualOtherBack',0);set('manualMemo','営業画面から自動取得');
-  updateManualBackPreview();updateManualProfitPreview();
+  manualClosingHourlyTouched=false;syncManualHourlyAuto();updateManualBackPreview();updateManualProfitPreview();
 }
 function openClosingSheetInput(){
   state.manualClosingSheets=state.manualClosingSheets||[];
@@ -3998,16 +4013,16 @@ function openClosingSheetInput(){
     <div><label>締めメモ</label><input id="manualDayMemo" value="${day.memo||''}" placeholder="その日の締め票メモ"></div>
   </div>
   <div class="section">キャスト別</div>
-  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm();loadOperationalCastIntoForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
+  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm();loadOperationalCastIntoForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div><div><label>時給</label><input id="manualHourly" type="number" min="0" step="10" value="2500" oninput="manualClosingHourlyTouched=true;updateManualProfitPreview()"><p class="muted">自動判定後も手動変更できます</p></div></div>
   <div class="section">バック入力（均一バックは自動計算）</div>
   <div class="grid4">
     <div><label>DB杯数</label><input id="manualDbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDbBackPreview">¥0</b></p></div>
     <div><label>SB杯数</label><input id="manualSbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualSbBackPreview">¥0</b></p></div>
     <div><label>場内本数</label><input id="manualJounai" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualJounaiBackPreview">¥0</b></p></div>
-    <div><label>同伴本数</label><input id="manualDohan" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDohanBackPreview">¥0</b></p></div>
-    <div><label>アフター本数</label><input id="manualAfter" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualAfterBackPreview">¥0</b></p></div>
-    <div><label>指名セットB</label><input id="manualNomSet" type="number" min="0" value="0" oninput="updateManualProfitPreview()"></div>
-    <div><label>指名小計B</label><input id="manualNomSub" type="number" min="0" value="0" oninput="updateManualProfitPreview()"></div>
+    <div><label>同伴本数</label><input id="manualDohan" type="number" min="0" value="0" oninput="manualClosingHourlyTouched=false;updateManualBackPreview();syncManualHourlyAuto()"><p class="muted">バック <b id="manualDohanBackPreview">¥0</b></p></div>
+    <div><label>アフター本数</label><input id="manualAfter" type="number" min="0" value="0" oninput="manualClosingHourlyTouched=false;updateManualBackPreview();syncManualHourlyAuto()"><p class="muted">バック <b id="manualAfterBackPreview">¥0</b></p></div>
+    <div><label>指名セットB</label><input id="manualNomSet" type="number" min="0" value="0" oninput="manualClosingHourlyTouched=false;syncManualHourlyAuto();updateManualProfitPreview()"></div>
+    <div><label>指名小計B</label><input id="manualNomSub" type="number" min="0" value="0" oninput="manualClosingHourlyTouched=false;syncManualHourlyAuto();updateManualProfitPreview()"></div>
     <div><label>テキカンバック金額</label><input id="manualWheelBack" type="number" min="0" value="0"></div>
     <div><label>シャンパンバック金額</label><input id="manualChampBack" type="number" min="0" value="0"></div>
     <div><label>その他バック</label><input id="manualOtherBack" type="number" min="0" value="0"></div>
@@ -4015,14 +4030,16 @@ function openClosingSheetInput(){
   </div>
   <div class="summary" id="manualProfitPreview" style="margin-top:12px"></div><div class="row" style="margin-top:12px"><button class="btn ok" id="manualClosingSaveButton" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" id="manualClosingCancelEdit" style="display:none" onclick="cancelManualClosingEdit()">修正をやめる</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
   openModal('selectModal');
-  setTimeout(()=>{loadOperationalCastIntoForm();updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
+  setTimeout(()=>{loadOperationalCastIntoForm();syncManualHourlyAuto();updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
 }
 function numFrom(id){return Number(document.getElementById(id)?.value||0)||0;}
 
 function manualCastFieldIds(){return ['manualCloseIn','manualCloseOut','manualDbQty','manualSbQty','manualJounai','manualDohan','manualAfter','manualNomSet','manualNomSub','manualWheelBack','manualChampBack','manualOtherBack','manualMemo'];}
 function resetManualCastForm(){
   manualClosingEditId=null;
+  manualClosingHourlyTouched=false;
   manualCastFieldIds().forEach(id=>{const el=document.getElementById(id);if(!el)return;el.value=(el.type==='number'?'0':'');});
+  const cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid),hourlyEl=document.getElementById('manualHourly');if(hourlyEl)hourlyEl.value=Number(castBackSettings(c||{}).hourly||2500);
   const btn=document.getElementById('manualClosingSaveButton');if(btn)btn.textContent='締め票入力を保存';
   const cancel=document.getElementById('manualClosingCancelEdit');if(cancel)cancel.style.display='none';
   updateManualBackPreview();updateManualProfitPreview();
@@ -4045,7 +4062,8 @@ function editManualClosingSheet(id){
   const r=(state.manualClosingSheets||[]).find(x=>x.id===id);if(!r)return;
   manualClosingEditId=id;
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};
-  set('manualCloseDate',r.businessDate);set('manualCloseCast',r.castId);set('manualCloseIn',r.in);set('manualCloseOut',r.out);
+  set('manualCloseDate',r.businessDate);set('manualCloseCast',r.castId);set('manualCloseIn',r.in);set('manualCloseOut',r.out);set('manualHourly',r.manualHourly||manualRowPayroll(r).rate);
+  manualClosingHourlyTouched=true;
   set('manualDbQty',r.dbQty||0);set('manualSbQty',r.sbQty||0);set('manualJounai',r.jounai||0);set('manualDohan',r.dohan||0);set('manualAfter',r.after||0);
   set('manualNomSet',r.nomSet||0);set('manualNomSub',r.nomSub||0);set('manualWheelBack',r.wheelBack||0);
   set('manualChampBack',r.champBack||0);set('manualOtherBack',r.otherBack||0);set('manualMemo',r.memo||'');
@@ -4072,7 +4090,7 @@ function saveManualClosingSheet(){
   state.manualClosingSheets=state.manualClosingSheets||[];
   const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
   const linkedBase=existing?.linkedBase||operationalCastSnapshot(cast,d);
-  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,linkedBase,
+  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,manualHourly:numFrom('manualHourly')||manualAutoHourlyFromForm(cast),linkedBase,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
     wheelCount:Number(existing?.wheelCount??linkedBase?.wheelCount??0),wheelBack:numFrom('manualWheelBack'),champCount:Number(existing?.champCount??linkedBase?.champCount??0),champBack:numFrom('manualChampBack'),
     jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:Number(existing?.nom??linkedBase?.nom??0),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
@@ -4097,7 +4115,7 @@ function manualRowPayroll(r){
   const c=(state.casts||[]).find(x=>x.id===r.castId)||{},bs=castBackSettings(c),base=Number(bs.hourly||2500);
   const has=!!(Number(r.nomSet||0)>0||Number(r.nomSub||0)>0||Number(r.dohan||0)>0||Number(r.dohanBack||0)>0);
   const af=!!(Number(r.after||0)>0||Number(r.afterBack||0)>0);
-  let rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);
+  let rate=Number(r.manualHourly||0);if(!rate){rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);}
   const timePayValue=timePayFromMinutes(rate,manualRowWorkMinutes(r));
   const back=Number(r.dbBack||0)+Number(r.sbBack||0)+Number(r.jounaiBack||0)+Number(r.dohanBack||0)+Number(r.afterBack||0)+Number(r.nomSet||0)+Number(r.nomSub||0)+Number(r.wheelBack||0)+Number(r.champBack||0)+Number(r.otherBack||0);
   return {rate,timePay:timePayValue,back,total:timePayValue+back};
