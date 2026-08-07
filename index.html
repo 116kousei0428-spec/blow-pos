@@ -2901,11 +2901,10 @@ function confirmClockManual(){let id=clockCastId.value,mode=clockMode.value,c=st
 function clockIn(id){openClockManual(id,'in')}function clockOut(id){openClockManual(id,'out')}function clockOutAll(){state.casts.forEach(c=>{if(c.status==='on'){let l=getLog(c);if(!l.in||l.in==='休み')l.in=businessTime10(now,state.businessDate,'ceil',26);l.out=businessTime10(now,state.businessDate,'ceil',26);l.absent=false;delete l.status;c.status='off';setLog(c,state.businessDate,l)}});render()}function editLog(id,f,v){let c=state.casts.find(x=>x.id===id),l=getLog(c),maxHour=f==='out'?26:25;l[f]=normalizeTimeValue(v,'exact',maxHour);l.absent=false;delete l.status;setLog(c,state.businessDate,l);render()}
 function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.out||l.out==='休み')return alert('退勤記録がありません');if(!confirm(`${c.name} の退勤を取り消して出勤中に戻しますか？`))return;l.out='';l.absent=false;delete l.status;c.status=l.in&&l.in!=='休み'?'on':'off';setLog(c,d,l);render()}
 function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;if(c.logs)c.logs[d]={in:'',out:'',absent:false};c.status='off';render()}
-function manualClosingCastRow(cid,d){return (state.manualClosingSheets||[]).find(x=>x.businessDate===d&&x.castId===cid)||null}
-function workMin(c,d){let m=manualClosingCastRow(c.id,d),l=m&&m.in?{in:m.in,out:m.out||'',absent:false}:getLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
+function workMin(c,d){let l=getLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){return dur(workMin(c,d))}
 function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=blocks(t.startedAt,new Date(s.checkoutAt))*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});(state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
-function wage(c,d){let s=stats(c.id,d),bs=castBackSettings(c),m=manualClosingCastRow(c.id,d),has=s.nom||s.dohan,af=s.after,base=Number(m?.hourly||bs.hourly||2500),rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
+function wage(c,d){let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
 function tenMinuteWageUnit(rate){
   const map={2000:340,2500:420,2700:450,2800:470,3000:500};
   rate=Number(rate||0);
@@ -3963,7 +3962,7 @@ function operationalStatsForCast(cid,d){
 }
 function operationalCastSnapshot(c,d){
   const st=operationalStatsForCast(c.id,d),l=getLog(c,d)||{};
-  return {in:l.in||'',out:l.out||'',hourly:castBackSettings(c).hourly||c.hourly||2500,dbQty:st.dbQty||0,dbBack:st.dbBack||0,sbQty:st.sbQty||0,sbBack:st.sbBack||0,jounai:st.jounai||0,jounaiBack:st.jounaiBack||0,nom:st.nom||0,nomSet:st.nomSet||0,nomSub:st.nomSub||0,dohan:st.dohan||0,dohanBack:st.dohanBack||0,after:st.after||0,afterBack:st.afterBack||0,wheelCount:st.wheelCount||0,wheelBack:st.wheelBack||0,champCount:st.champCount||0,champBack:st.champBack||0,otherBack:0};
+  return {in:l.in||'',out:l.out||'',dbQty:st.dbQty||0,dbBack:st.dbBack||0,sbQty:st.sbQty||0,sbBack:st.sbBack||0,jounai:st.jounai||0,jounaiBack:st.jounaiBack||0,nom:st.nom||0,nomSet:st.nomSet||0,nomSub:st.nomSub||0,dohan:st.dohan||0,dohanBack:st.dohanBack||0,after:st.after||0,afterBack:st.afterBack||0,wheelCount:st.wheelCount||0,wheelBack:st.wheelBack||0,champCount:st.champCount||0,champBack:st.champBack||0,otherBack:0};
 }
 function manualClosingFormDay(d){
   const saved=manualDayCloseForDate(d),op=operationalRevenueForDate(d);
@@ -3978,7 +3977,7 @@ function loadOperationalCastIntoForm(){
   if(manualClosingEditId)return;
   const d=document.getElementById('manualCloseDate')?.value||state.businessDate,cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid);if(!c)return;
   const x=operationalCastSnapshot(c,d),set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??0};
-  set('manualCloseIn',x.in);set('manualCloseOut',x.out);set('manualHourly',x.hourly);set('manualDbQty',x.dbQty);set('manualSbQty',x.sbQty);set('manualJounai',x.jounai);set('manualDohan',x.dohan);set('manualAfter',x.after);set('manualNom',x.nom);set('manualNomSet',x.nomSet);set('manualNomSub',x.nomSub);set('manualWheelCount',x.wheelCount);set('manualWheelBack',x.wheelBack);set('manualChampCount',x.champCount);set('manualChampBack',x.champBack);set('manualOtherBack',0);set('manualMemo','営業画面から自動取得');
+  set('manualCloseIn',x.in);set('manualCloseOut',x.out);set('manualDbQty',x.dbQty);set('manualSbQty',x.sbQty);set('manualJounai',x.jounai);set('manualDohan',x.dohan);set('manualAfter',x.after);set('manualNomSet',x.nomSet);set('manualNomSub',x.nomSub);set('manualWheelBack',x.wheelBack);set('manualChampBack',x.champBack);set('manualOtherBack',0);set('manualMemo','営業画面から自動取得');
   updateManualBackPreview();updateManualProfitPreview();
 }
 function openClosingSheetInput(){
@@ -3999,20 +3998,17 @@ function openClosingSheetInput(){
     <div><label>締めメモ</label><input id="manualDayMemo" value="${day.memo||''}" placeholder="その日の締め票メモ"></div>
   </div>
   <div class="section">キャスト別</div>
-  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm();loadOperationalCastIntoForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div><div><label>基本時給</label><input id="manualHourly" type="number" min="0" value="0" oninput="updateManualProfitPreview()"></div></div>
-  <div class="section">杯数・本数（均一バックは自動計算）</div>
+  <div class="grid4"><div><label>キャスト</label><select id="manualCloseCast" onchange="resetManualCastForm();loadOperationalCastIntoForm()">${manualClosingCastOptions()}</select></div><div><label>出勤</label><input id="manualCloseIn" placeholder="20:00 / 2000"></div><div><label>退勤</label><input id="manualCloseOut" placeholder="25:00 / 2500"></div></div>
+  <div class="section">バック入力（均一バックは自動計算）</div>
   <div class="grid4">
     <div><label>DB杯数</label><input id="manualDbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDbBackPreview">¥0</b></p></div>
     <div><label>SB杯数</label><input id="manualSbQty" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualSbBackPreview">¥0</b></p></div>
     <div><label>場内本数</label><input id="manualJounai" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualJounaiBackPreview">¥0</b></p></div>
     <div><label>同伴本数</label><input id="manualDohan" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualDohanBackPreview">¥0</b></p></div>
     <div><label>アフター本数</label><input id="manualAfter" type="number" min="0" value="0" oninput="updateManualBackPreview()"><p class="muted">バック <b id="manualAfterBackPreview">¥0</b></p></div>
-    <div><label>指名本数</label><input id="manualNom" type="number" min="0" value="0"></div>
-    <div><label>指名セットB</label><input id="manualNomSet" type="number" min="0" value="0"></div>
-    <div><label>指名小計B</label><input id="manualNomSub" type="number" min="0" value="0"></div>
-    <div><label>テキカン数</label><input id="manualWheelCount" type="number" min="0" value="0"></div>
+    <div><label>指名セットB</label><input id="manualNomSet" type="number" min="0" value="0" oninput="updateManualProfitPreview()"></div>
+    <div><label>指名小計B</label><input id="manualNomSub" type="number" min="0" value="0" oninput="updateManualProfitPreview()"></div>
     <div><label>テキカンバック金額</label><input id="manualWheelBack" type="number" min="0" value="0"></div>
-    <div><label>シャンパン数</label><input id="manualChampCount" type="number" min="0" value="0"></div>
     <div><label>シャンパンバック金額</label><input id="manualChampBack" type="number" min="0" value="0"></div>
     <div><label>その他バック</label><input id="manualOtherBack" type="number" min="0" value="0"></div>
     <div><label>メモ</label><input id="manualMemo" placeholder="締め票から入力"></div>
@@ -4023,7 +4019,7 @@ function openClosingSheetInput(){
 }
 function numFrom(id){return Number(document.getElementById(id)?.value||0)||0;}
 
-function manualCastFieldIds(){return ['manualCloseIn','manualCloseOut','manualHourly','manualDbQty','manualSbQty','manualJounai','manualDohan','manualAfter','manualNom','manualNomSet','manualNomSub','manualWheelCount','manualWheelBack','manualChampCount','manualChampBack','manualOtherBack','manualMemo'];}
+function manualCastFieldIds(){return ['manualCloseIn','manualCloseOut','manualDbQty','manualSbQty','manualJounai','manualDohan','manualAfter','manualNomSet','manualNomSub','manualWheelBack','manualChampBack','manualOtherBack','manualMemo'];}
 function resetManualCastForm(){
   manualClosingEditId=null;
   manualCastFieldIds().forEach(id=>{const el=document.getElementById(id);if(!el)return;el.value=(el.type==='number'?'0':'');});
@@ -4049,10 +4045,10 @@ function editManualClosingSheet(id){
   const r=(state.manualClosingSheets||[]).find(x=>x.id===id);if(!r)return;
   manualClosingEditId=id;
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};
-  set('manualCloseDate',r.businessDate);set('manualCloseCast',r.castId);set('manualCloseIn',r.in);set('manualCloseOut',r.out);set('manualHourly',r.hourly||castBackSettings((state.casts||[]).find(c=>c.id===r.castId)||{}).hourly||2500);
+  set('manualCloseDate',r.businessDate);set('manualCloseCast',r.castId);set('manualCloseIn',r.in);set('manualCloseOut',r.out);
   set('manualDbQty',r.dbQty||0);set('manualSbQty',r.sbQty||0);set('manualJounai',r.jounai||0);set('manualDohan',r.dohan||0);set('manualAfter',r.after||0);
-  set('manualNom',r.nom||0);set('manualNomSet',r.nomSet||0);set('manualNomSub',r.nomSub||0);set('manualWheelCount',r.wheelCount||0);set('manualWheelBack',r.wheelBack||0);
-  set('manualChampCount',r.champCount||0);set('manualChampBack',r.champBack||0);set('manualOtherBack',r.otherBack||0);set('manualMemo',r.memo||'');
+  set('manualNomSet',r.nomSet||0);set('manualNomSub',r.nomSub||0);set('manualWheelBack',r.wheelBack||0);
+  set('manualChampBack',r.champBack||0);set('manualOtherBack',r.otherBack||0);set('manualMemo',r.memo||'');
   const btn=document.getElementById('manualClosingSaveButton');if(btn)btn.textContent='修正内容を更新';
   const cancel=document.getElementById('manualClosingCancelEdit');if(cancel)cancel.style.display='inline-block';
   updateManualBackPreview();updateManualProfitPreview();
@@ -4076,10 +4072,10 @@ function saveManualClosingSheet(){
   state.manualClosingSheets=state.manualClosingSheets||[];
   const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
   const linkedBase=existing?.linkedBase||operationalCastSnapshot(cast,d);
-  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,hourly:numFrom('manualHourly')||castBackSettings(cast).hourly||2500,linkedBase,
+  const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,linkedBase,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
-    wheelCount:numFrom('manualWheelCount'),wheelBack:numFrom('manualWheelBack'),champCount:numFrom('manualChampCount'),champBack:numFrom('manualChampBack'),
-    jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:numFrom('manualNom'),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
+    wheelCount:Number(existing?.wheelCount??linkedBase?.wheelCount??0),wheelBack:numFrom('manualWheelBack'),champCount:Number(existing?.champCount??linkedBase?.champCount??0),champBack:numFrom('manualChampBack'),
+    jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:Number(existing?.nom??linkedBase?.nom??0),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
     dohan:qty.dohan,dohanBack:backs.dohanBack,after:qty.after,afterBack:backs.afterBack,otherBack:numFrom('manualOtherBack'),
     memo:document.getElementById('manualMemo')?.value||'',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
   if(existing) state.manualClosingSheets=state.manualClosingSheets.map(x=>x.id===existing.id?rec:x); else state.manualClosingSheets.push(rec);
@@ -4093,12 +4089,25 @@ function saveManualClosingSheet(){
   renderManualClosingList(d);
   alert(existing?'締め票入力を修正しました。':'締め票入力を保存しました。週間表・月間表へ反映済みです。');
 }
+function manualRowWorkMinutes(r){
+  if(!r||!r.in||!r.out)return 0;
+  const a=parseDT(r.businessDate,r.in),b=parseDT(r.businessDate,r.out);if(!a||!b)return 0;if(b<a)b.setDate(b.getDate()+1);return round10(Math.max(0,Math.floor((b-a)/60000)));
+}
+function manualRowPayroll(r){
+  const c=(state.casts||[]).find(x=>x.id===r.castId)||{},bs=castBackSettings(c),base=Number(bs.hourly||2500);
+  const has=!!(Number(r.nomSet||0)>0||Number(r.nomSub||0)>0||Number(r.dohan||0)>0||Number(r.dohanBack||0)>0);
+  const af=!!(Number(r.after||0)>0||Number(r.afterBack||0)>0);
+  let rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);
+  const timePayValue=timePayFromMinutes(rate,manualRowWorkMinutes(r));
+  const back=Number(r.dbBack||0)+Number(r.sbBack||0)+Number(r.jounaiBack||0)+Number(r.dohanBack||0)+Number(r.afterBack||0)+Number(r.nomSet||0)+Number(r.nomSub||0)+Number(r.wheelBack||0)+Number(r.champBack||0)+Number(r.otherBack||0);
+  return {rate,timePay:timePayValue,back,total:timePayValue+back};
+}
 function renderManualClosingList(d=state.businessDate){
   const box=document.getElementById('manualClosingList'); if(!box)return;
   const day=manualDayRevenue(d);
-  const rows=manualClosingRowsForDate(d).map(r=>`<tr><td>${r.castName}</td><td>${r.in||'-'}〜${r.out||'-'}</td><td>${yen(r.hourly||castBackSettings((state.casts||[]).find(c=>c.id===r.castId)||{}).hourly||2500)}</td><td>${r.dbQty}杯 / ${yen(r.dbBack)}</td><td>${r.sbQty}杯 / ${yen(r.sbBack)}</td><td>${r.jounai} / ${yen(r.jounaiBack)}</td><td>${r.nom} / ${yen((r.nomSet||0)+(r.nomSub||0))}</td><td>${r.dohan} / ${yen(r.dohanBack)}</td><td>${yen((r.otherBack||0)+(r.wheelBack||0)+(r.champBack||0)+(r.afterBack||0))}</td><td><button class="btn blue small" onclick="editManualClosingSheet('${r.id}')">修正</button> <button class="btn bad small" onclick="deleteManualClosingSheet('${r.id}')">削除</button></td></tr>`).join('')||'<tr><td colspan="10" class="muted">締め票入力なし</td></tr>';
+  const rows=manualClosingRowsForDate(d).map(r=>{const p=manualRowPayroll(r);return `<tr><td>${r.castName}</td><td>${r.in||'-'}〜${r.out||'-'}</td><td>${r.dbQty}杯 / ${yen(r.dbBack)}</td><td>${r.sbQty}杯 / ${yen(r.sbBack)}</td><td>${r.jounai} / ${yen(r.jounaiBack)}</td><td>${yen((r.nomSet||0)+(r.nomSub||0))}</td><td>${r.dohan} / ${yen(r.dohanBack)}</td><td>${yen((r.otherBack||0)+(r.wheelBack||0)+(r.champBack||0)+(r.afterBack||0))}</td><td class="right"><b>${yen(p.total)}</b><div class="muted" style="font-size:11px">時給 ${yen(p.rate)} / 時間給 ${yen(p.timePay)} / B ${yen(p.back)}</div></td><td><button class="btn blue small" onclick="editManualClosingSheet('${r.id}')">修正</button> <button class="btn bad small" onclick="deleteManualClosingSheet('${r.id}')">削除</button></td></tr>`}).join('')||'<tr><td colspan="10" class="muted">締め票入力なし</td></tr>';
   const savedDay=manualDayCloseForDate(d)||{};const pay=manualPayrollForDate(d);const receipt=Number(savedDay.receiptExpense||0);const profit=day.total-pay.total-receipt;
-  box.innerHTML=`<div class="section">${d} 締め票入力一覧</div><div class="summary">${cardStat('売上入力',day.total)}${cardStat('現金',day.cash)}${cardStat('カード',day.card)}${cardStat('未収',day.unpaid)}${cardStat('キャスト給与',pay.total)}${cardStat('領収書',receipt)}${cardStat('純利益',profit)}</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出退勤</th><th>時給</th><th>DB</th><th>SB</th><th>場内</th><th>指名</th><th>同伴</th><th>その他</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  box.innerHTML=`<div class="section">${d} 締め票入力一覧</div><div class="summary">${cardStat('売上入力',day.total)}${cardStat('現金',day.cash)}${cardStat('カード',day.card)}${cardStat('未収',day.unpaid)}${cardStat('キャスト給与',pay.total)}${cardStat('領収書',receipt)}${cardStat('純利益',profit)}</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出退勤</th><th>DB</th><th>SB</th><th>場内</th><th>指名バック</th><th>同伴</th><th>その他</th><th class="right">給与合計</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function deleteManualClosingSheet(id){
   const rec=(state.manualClosingSheets||[]).find(x=>x.id===id);
