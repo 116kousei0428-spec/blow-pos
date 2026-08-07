@@ -673,7 +673,7 @@ function emptyTable(id){return{id,status:'empty',startedAt:null,serviceMinutes:B
 function init(){return{businessDate:bizDate(),casts:[],tables:TABLES.map(emptyTable),sales:[],expenses:[]}}
 let state=(()=>{try{return{...init(),...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch{return init()}})();
 state.cashFlows=state.cashFlows||[]; state.closings=state.closings||[]; state.orderDeleteLogs=state.orderDeleteLogs||[]; state.businessSheets=state.businessSheets||[];
-state.unpaids=state.unpaids||[]; state.backups=state.backups||[]; state.payrollLocks=state.payrollLocks||{}; state.visitorEntries=state.visitorEntries||[]; state.receiptEditAudit=state.receiptEditAudit||[]; state.receiptEditOtp=state.receiptEditOtp||null; state.manualClosingSheets=state.manualClosingSheets||[]; state.manualClosingDaySheets=state.manualClosingDaySheets||[];
+state.unpaids=state.unpaids||[]; state.backups=state.backups||[]; state.payrollLocks=state.payrollLocks||{}; state.visitorEntries=state.visitorEntries||[]; state.receiptEditAudit=state.receiptEditAudit||[]; state.receiptEditOtp=state.receiptEditOtp||null; state.manualClosingSheets=state.manualClosingSheets||[]; state.manualClosingDaySheets=state.manualClosingDaySheets||[]; state.manualClosingDeleted=state.manualClosingDeleted||{};
 const DEFAULT_BACK_SETTINGS={hourly:2500,deductionRate:10.21,dbBack:300,sbBack:600,jounaiBack:500,dohanBack:2000,afterBack:1000,nomSetBack:1000,nomSubRate:5,wheelNomRate:20,wheelFreeRate:10,wheelFullFreeRate:20,champNomRate:20,champFreeRate:10,champFullFreeRate:20,raiseNomDohan:300,raiseAfter:200,raiseBoth:500};
 function normalizeBackSettings(v={}){let o={...DEFAULT_BACK_SETTINGS,...(v||{})};Object.keys(DEFAULT_BACK_SETTINGS).forEach(k=>{o[k]=Number(o[k]);if(!Number.isFinite(o[k]))o[k]=DEFAULT_BACK_SETTINGS[k];});return o}
 state.defaultBackSettings=normalizeBackSettings(state.defaultBackSettings);
@@ -702,7 +702,7 @@ if(!state.visitorEntriesMigrated){
   (state.sales||[]).forEach(sale=>{if(!existingIds.has(sale.id))state.visitorEntries.push({id:uuid(),saleId:sale.id,businessDate:sale.businessDate,tableId:sale.table?.id||'-',guests:Number(sale.table?.guests||0),startedAt:sale.table?.startedAt||sale.checkoutAt,createdAt:sale.checkoutAt||new Date().toISOString(),migrated:true})});
   state.visitorEntriesMigrated=true;
 }
-state.manualClosingSheets=Array.isArray(state.manualClosingSheets)?state.manualClosingSheets:[]; state.manualClosingDaySheets=Array.isArray(state.manualClosingDaySheets)?state.manualClosingDaySheets:[];
+state.manualClosingSheets=Array.isArray(state.manualClosingSheets)?state.manualClosingSheets:[]; state.manualClosingDaySheets=Array.isArray(state.manualClosingDaySheets)?state.manualClosingDaySheets:[]; state.manualClosingDeleted=(state.manualClosingDeleted&&typeof state.manualClosingDeleted==='object')?state.manualClosingDeleted:{};
 // 起動時点で古い巨大バックアップ履歴を軽量化（売上・キャスト・締め票は消さない）
 state.backups=(Array.isArray(state.backups)?state.backups:[]).slice(0,20).map(b=>({id:(b&&b.id)||uuid(),businessDate:(b&&b.businessDate)||state.businessDate,createdAt:(b&&b.createdAt)||new Date().toISOString(),reason:(b&&b.reason)||'auto'}));
 
@@ -871,6 +871,48 @@ function applyOneTimeVisitorHistoryCleanup(){
   state.visitorHistoryCleanupVersion=VISITOR_HISTORY_CLEANUP_VERSION;
   return true;
 }
+function recordUpdatedMs(x){
+  if(!x)return 0;
+  return Number(Date.parse(x.updatedAt||x.createdAt||0))||0;
+}
+function mergeClosingDeleteMaps(localMap,remoteMap){
+  const out={...(remoteMap||{})};
+  Object.entries(localMap||{}).forEach(([id,ts])=>{
+    const a=Number(Date.parse(ts)||ts||0), b=Number(Date.parse(out[id])||out[id]||0);
+    if(a>b)out[id]=ts;
+  });
+  return out;
+}
+function mergeManualClosingRecords(localRows,remoteRows,deletedMap){
+  const byId=new Map();
+  [...(remoteRows||[]),...(localRows||[])].forEach(r=>{
+    if(!r||!r.id)return;
+    const old=byId.get(r.id);
+    if(!old||recordUpdatedMs(r)>=recordUpdatedMs(old))byId.set(r.id,r);
+  });
+  const alive=[];
+  byId.forEach(r=>{
+    const deletedAt=Number(Date.parse((deletedMap||{})[r.id])||(deletedMap||{})[r.id]||0);
+    if(!deletedAt||recordUpdatedMs(r)>deletedAt)alive.push(r);
+  });
+  // 同一営業日・同一キャストが別端末で別ID保存された場合も、新しい1件だけ残す。
+  const byCastDate=new Map();
+  alive.forEach(r=>{
+    const key=String(r.businessDate||'')+'|'+String(r.castId||r.castName||'');
+    const old=byCastDate.get(key);
+    if(!old||recordUpdatedMs(r)>=recordUpdatedMs(old))byCastDate.set(key,r);
+  });
+  return [...byCastDate.values()];
+}
+function mergeManualClosingDayRecords(localRows,remoteRows){
+  const byDate=new Map();
+  [...(remoteRows||[]),...(localRows||[])].forEach(r=>{
+    if(!r||!r.businessDate)return;
+    const old=byDate.get(r.businessDate);
+    if(!old||recordUpdatedMs(r)>=recordUpdatedMs(old))byDate.set(r.businessDate,r);
+  });
+  return [...byDate.values()];
+}
 async function pollCloudChanges(){
   if(autoSyncBusy||applyingRemoteState||!isAutoSyncEnabled()||document.hidden)return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
@@ -901,7 +943,16 @@ async function pollCloudChanges(){
     if(data.device===(cfg.device||'unknown-device')&&remoteSig===lastRemoteSignature)return;
     if(remoteTs && remoteTs<=lastRemoteUpdatedAt)return;
     applyingRemoteState=true;
-    state=normalizeRestoreDataForLocalStorage(nextState);
+    // 締め票入力は全体同期の丸ごと上書きから保護する。別端末の古いstateで保存済みキャストが消えないようID単位でマージ。
+    const localManualClosingSheets=deepCopy(state.manualClosingSheets||[]);
+    const localManualClosingDaySheets=deepCopy(state.manualClosingDaySheets||[]);
+    const localManualClosingDeleted={...(state.manualClosingDeleted||{})};
+    const incoming=normalizeRestoreDataForLocalStorage(nextState);
+    const mergedDeleted=mergeClosingDeleteMaps(localManualClosingDeleted,incoming.manualClosingDeleted||{});
+    incoming.manualClosingDeleted=mergedDeleted;
+    incoming.manualClosingSheets=mergeManualClosingRecords(localManualClosingSheets,incoming.manualClosingSheets||[],mergedDeleted);
+    incoming.manualClosingDaySheets=mergeManualClosingDayRecords(localManualClosingDaySheets,incoming.manualClosingDaySheets||[]);
+    state=incoming;
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
     const liveJounaiFixed=repairExistingLiveJounaiPhases();
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
@@ -1644,8 +1695,7 @@ function resetWorkingDataForBusinessStart(d){
   state.expenses=(state.expenses||[]).filter(x=>x.businessDate!==d);
   state.cashFlows=(state.cashFlows||[]).filter(x=>x.businessDate!==d);
   state.closings=(state.closings||[]).filter(x=>x.businessDate!==d);
-  state.manualClosingSheets=(state.manualClosingSheets||[]).filter(x=>x.businessDate!==d);
-  state.manualClosingDaySheets=(state.manualClosingDaySheets||[]).filter(x=>x.businessDate!==d);
+  // 締め票入力は過去入力・手修正データなので営業開始では消さない。
   state.orderDeleteLogs=(state.orderDeleteLogs||[]).filter(x=>x.businessDate!==d);
   state.unpaids=(state.unpaids||[]).filter(x=>x.businessDate!==d);
   (state.casts||[]).forEach(c=>{
@@ -2784,6 +2834,7 @@ function normalizeRestoreDataForLocalStorage(data){
   restored.visitorEntriesMigrated=restored.visitorEntriesMigrated===true;
   restored.manualClosingSheets=Array.isArray(restored.manualClosingSheets)?restored.manualClosingSheets:[];
   restored.manualClosingDaySheets=Array.isArray(restored.manualClosingDaySheets)?restored.manualClosingDaySheets:[];
+  restored.manualClosingDeleted=(restored.manualClosingDeleted&&typeof restored.manualClosingDeleted==='object')?restored.manualClosingDeleted:{};
   return restored;
 }
 
@@ -3081,6 +3132,8 @@ function deleteBusinessHistory(d){
   state.closings=(state.closings||[]).filter(x=>x.businessDate!==d);
   state.orderDeleteLogs=(state.orderDeleteLogs||[]).filter(x=>x.businessDate!==d);
   state.businessSheets=(state.businessSheets||[]).filter(x=>x.businessDate!==d);
+  state.manualClosingDeleted=state.manualClosingDeleted||{};
+  (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).forEach(x=>{if(x.id)state.manualClosingDeleted[x.id]=new Date().toISOString()});
   state.manualClosingSheets=(state.manualClosingSheets||[]).filter(x=>x.businessDate!==d);
   (state.casts||[]).forEach(c=>{ if(c.logs && c.logs[d]) delete c.logs[d]; });
   save();
@@ -4101,6 +4154,8 @@ function saveManualClosingSheet(){
     jounai:qty.jounai,jounaiBack:backs.jounaiBack,nom:Number(existing?.nom??linkedBase?.nom??0),nomSet:numFrom('manualNomSet'),nomSub:numFrom('manualNomSub'),
     dohan:qty.dohan,dohanBack:backs.dohanBack,after:qty.after,afterBack:backs.afterBack,otherBack:numFrom('manualOtherBack'),
     memo:document.getElementById('manualMemo')?.value||'',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  state.manualClosingDeleted=state.manualClosingDeleted||{};
+  delete state.manualClosingDeleted[rec.id];
   if(existing) state.manualClosingSheets=state.manualClosingSheets.map(x=>x.id===existing.id?rec:x); else state.manualClosingSheets.push(rec);
   if((inTime||outTime)&&!rec.linkedBase){cast.logs=cast.logs||{};cast.logs[d]={...(cast.logs[d]||{}),in:inTime||cast.logs[d]?.in||'',out:outTime||cast.logs[d]?.out||'',manualClosing:true};}
   save();
@@ -4136,6 +4191,8 @@ function deleteManualClosingSheet(id){
   const rec=(state.manualClosingSheets||[]).find(x=>x.id===id);
   if(!rec)return;
   if(!confirm('この締め票入力を削除しますか？'))return;
+  state.manualClosingDeleted=state.manualClosingDeleted||{};
+  state.manualClosingDeleted[id]=new Date().toISOString();
   state.manualClosingSheets=(state.manualClosingSheets||[]).filter(x=>x.id!==id);
   save();render();renderManualClosingList(rec.businessDate);
 }
