@@ -1376,7 +1376,13 @@ function ensureOperationPhases(t){
 function addOperationPhase(t,key,cid,phase=currentOrderPhase(t)){
   const all=ensureOperationPhases(t),map=all[key]||(all[key]={});
   if(!Array.isArray(map[cid]))map[cid]=[];
+  // アフターは1卓につきキャスト1人1回のみ。延長回数に関係なく二重登録させない。
+  if(key==='after' && map[cid].length){
+    map[cid]=[Math.min(...map[cid].map(v=>Math.max(0,Number(v)||0)))];
+    return false;
+  }
   map[cid].push(Math.max(0,Number(phase)||0));
+  return true;
 }
 function removeOperationPhase(t,key,cid,qty=1){
   const all=ensureOperationPhases(t),arr=Array.isArray(all[key]?.[cid])?all[key][cid]:[];
@@ -1388,7 +1394,12 @@ function syncNonJounaiOperationPhases(t){
   const all=ensureOperationPhases(t);
   const nowPhase=currentOrderPhase(t);
   ['nominations','dohan','after'].forEach(key=>{
-    const arr=Array.isArray(t[key])?t[key]:[];
+    let arr=Array.isArray(t[key])?t[key]:[];
+    // アフターは延長をまたいでも1卓につき同一キャスト1回まで。旧データの重複もここで自動補正する。
+    if(key==='after'){
+      arr=[...new Set(arr.filter(Boolean))];
+      t.after=arr;
+    }
     const desired={};
     arr.forEach(cid=>{if(cid)desired[cid]=(desired[cid]||0)+1;});
     const map=all[key]||(all[key]={});
@@ -1420,6 +1431,15 @@ function repairOperationPhases(t){
   });
   Object.keys(all.jounai||{}).forEach(cid=>{if(!active.has(cid))delete all.jounai[cid];});
   Object.keys(counts).forEach(cid=>{if(!active.has(cid))delete counts[cid];});
+  // アフターはどの経路から入っても必ず「同一キャスト1回」に正規化する。
+  t.after=[...new Set((t.after||[]).filter(Boolean))];
+  const afterMap=all.after||(all.after={});
+  Object.keys(afterMap).forEach(cid=>{
+    if(!(t.after||[]).includes(cid)){delete afterMap[cid];return;}
+    const phases=Array.isArray(afterMap[cid])?afterMap[cid]:[];
+    afterMap[cid]=[phases.length?Math.min(...phases.map(v=>Math.max(0,Math.min(maxPhase,Number(v)||0)))):0];
+  });
+  (t.after||[]).forEach(cid=>{if(!Array.isArray(afterMap[cid])||!afterMap[cid].length)afterMap[cid]=[0];});
 }
 function repairExistingLiveJounaiPhases(){
   let changed=false;
@@ -2311,7 +2331,7 @@ function champ(id){let cats=[...new Set(CH.map(c=>c.cat))];selectTitle.textConte
 function champCasts(id,cid){let ch=CH.find(c=>c.id===cid);selectTitle.textContent=ch.name;selectBody.innerHTML=`<div class="grid4" id="champCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveChamp('${id}','${cid}')">追加</button>`}
 function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let phase=currentOrderPhase(t),ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid,orderPhase:phase});closeModal('selectModal');render()}
 function ops(id){let t=state.tables.find(x=>x.id===id);selectTitle.textContent='指名/同伴/場内/アフター';selectBody.innerHTML=[['nominations','指名'],['dohan','同伴'],['jounai','場内'],['after','アフター']].map(([k,l])=>`<h3>${l}</h3><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOp('${id}','${k}','${c.id}')">${c.name}</button>`).join('')}</div>`).join('');openModal('selectModal')}
-function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);selectTitle.textContent=label+' 追加/解除';selectBody.innerHTML=`<h3>${label}</h3><p class="muted">この画面は何回でも開けます。押すたびに追加/解除します。</p><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
+function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);selectTitle.textContent=label+' 追加/解除';let note=k==='after'?'アフターは1卓につきキャスト1人1回までです。緑は登録済みです。':'この画面は何回でも開けます。押すたびに追加/解除します。';selectBody.innerHTML=`<h3>${label}</h3><p class="muted">${note}</p><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
 function toggleOperationValue(t,k,cid){
   let a=t[k]||[],phase=currentOrderPhase(t);
   if(k==='jounai'){
@@ -4362,7 +4382,7 @@ function runPosSelfTests(){
   let testTable={guests:1,nominations:['c1'],jounai:['c2'],dohan:[],after:[],items:[{type:'extension',price:3000,qty:1}],startedAt:new Date().toISOString(),payment:'cash'};
   console.assert(repeatChargeCount(testTable)===2,'延長1回で初回+延長の2回分');
   console.assert(calc(testTable).nomination===4000,'指名料金は延長ごとに加算');
-  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');let lateAdd={jounai:[],jounaiCounts:{},operationPhases:{nominations:{},dohan:{},jounai:{},after:{}},items:[{type:'extension',price:3000,qty:1,orderPhase:1}]};addJounaiCharge(lateAdd,'c7',1,1);lateAdd.jounai.push('c7');repairOperationPhases(lateAdd);console.assert(lateAdd.operationPhases.jounai.c7.join(',')==='1','後から追加した場内は初回に遡らず追加したセットから開始');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');let carryTest={jounai:['c9'],jounaiCounts:{c9:1},operationPhases:{nominations:{},dohan:{},jounai:{c9:[0]},after:{}},items:[{type:'extension',qty:1,orderPhase:1}]};carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','延長確定時に場内を次セットへ自動継続');carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','同じ延長セットへ二重追加しない');
+  console.assert(calc(testTable).jounai===0,'場内料金は場内カウント記録から計算');let jt={guests:1,nominations:[],jounai:['c2'],jounaiCounts:{},operationPhases:{jounai:{}},dohan:[],after:[],items:[{type:'extension',price:3000,qty:1,orderPhase:1}],startedAt:new Date().toISOString(),payment:'cash'};addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'延長セットで付いた場内はそのセットから1回分');let lateAdd={jounai:[],jounaiCounts:{},operationPhases:{nominations:{},dohan:{},jounai:{},after:{}},items:[{type:'extension',price:3000,qty:1,orderPhase:1}]};addJounaiCharge(lateAdd,'c7',1,1);lateAdd.jounai.push('c7');repairOperationPhases(lateAdd);console.assert(lateAdd.operationPhases.jounai.c7.join(',')==='1','後から追加した場内は初回に遡らず追加したセットから開始');addJounaiCharge(jt,'c2',1,1);console.assert(calc(jt).jounai===1000,'同じセット同じキャストの場内は二重追加しない');jt.items.push({type:'extension',price:3000,qty:1,orderPhase:2});addJounaiCharge(jt,'c2',1,2);console.assert(calc(jt).jounai===2000,'次の延長セットでは自動で1回追加される');let carryTest={jounai:['c9'],jounaiCounts:{c9:1},operationPhases:{nominations:{},dohan:{},jounai:{c9:[0]},after:{}},items:[{type:'extension',qty:1,orderPhase:1}]};carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','延長確定時に場内を次セットへ自動継続');carryActiveJounaiToPhase(carryTest,1);console.assert(carryTest.operationPhases.jounai.c9.join(',')==='0,1','同じ延長セットへ二重追加しない');let afterOnce={after:['c3','c3'],operationPhases:{nominations:{},dohan:{},jounai:{},after:{c3:[0,1,2]}},items:[{type:'extension',qty:1,orderPhase:1},{type:'extension',qty:1,orderPhase:2}]};repairOperationPhases(afterOnce);console.assert(afterOnce.after.length===1&&afterOnce.operationPhases.after.c3.length===1,'アフターは延長に関係なく1卓1キャスト1回まで');
   console.assert(calc(testTable).single===4000,'シングルチャージは延長ごとに加算');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','22:59'),'2026-05-23')===5000,'延長料金は22:59まで5000円');
   console.assert(extensionRateAt(parseBusinessDT('2026-05-23','23:00'),'2026-05-23')===6000,'延長料金は23:00から6000円');
