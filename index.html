@@ -1841,9 +1841,9 @@ function details(t,c){
       const first=Math.min(...(phases||[0]).map(Number));
       if(phase>=first && (t.nominations||[]).includes(cid) && nominationUnit>0){let amount=nominationUnit;subtotal+=amount;rows+=`<tr><td>本指名 ${esc(cname(cid))} ×1</td><td class="right">${yen(amount)}</td></tr>`;}
     });
-    operationPhaseEntries(t,'jounai',phase).forEach(x=>{let amount=1000*x.count;subtotal+=amount;rows+=`<tr><td>場内 ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
+    operationPhaseEntries(t,'jounai',phase).forEach(x=>{let amount=1000*x.count;subtotal+=amount;rows+=`<tr><td>場内 ${esc(cname(x.cid))} ×${x.count}<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deleteOperationPhaseQty('${t.id}','jounai','${x.cid}',${phase},'場内')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;});
     operationPhaseEntries(t,'dohan',phase).forEach(x=>{let amount=3000*x.count;subtotal+=amount;rows+=`<tr><td>同伴 ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
-    operationPhaseEntries(t,'after',phase).forEach(x=>{let amount=3000*x.count;subtotal+=amount;rows+=`<tr><td>アフター ${esc(cname(x.cid))} ×${x.count}</td><td class="right">${yen(amount)}</td></tr>`;});
+    operationPhaseEntries(t,'after',phase).forEach(x=>{let amount=3000*x.count;subtotal+=amount;rows+=`<tr><td>アフター ${esc(cname(x.cid))} ×${x.count}<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deleteOperationPhaseQty('${t.id}','after','${x.cid}',${phase},'アフター')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;});
     phaseItems.forEach(i=>{
       let targetLabel=i.castId?'('+cname(i.castId)+')':(i.target==='guest'||i.type==='guestShot'?'(ゲスト)':'');
       let label=`${i.name}${targetLabel} ×${i.qty}`;
@@ -1892,6 +1892,49 @@ function deleteOrderItem(tableId,itemId){
   state.orderDeleteLogs.unshift({id:uuid(),businessDate:state.businessDate,at:new Date().toISOString(),tableId,name:item.name,price:item.price,qty:delQty,castId:item.castId||'',type:item.type||''});
   render();
 }
+
+function deleteOperationPhaseQty(tableId,key,cid,phase,label){
+  let t=state.tables.find(x=>x.id===tableId);
+  if(!t)return;
+  phase=Math.max(0,Number(phase)||0);
+  const all=ensureOperationPhases(t),map=all[key]||(all[key]={});
+  let phases=Array.isArray(map[cid])?map[cid]:[];
+  let available=phases.filter(p=>Number(p)===phase).length;
+  if(!available)return;
+  let delQty=askDeleteQty(label,available);
+  if(!delQty)return;
+  if(!confirm(`${label} ${cname(cid)} を ${delQty} 件削除しますか？`))return;
+
+  if(key==='jounai'){
+    // 場内は「付いたセットから以後の延長へ継続」のため、
+    // 途中のセットだけ消すと次の再計算で復活する。クリックしたセット以降を取り消す。
+    map[cid]=phases.filter(p=>Number(p)<phase);
+    const counts=ensureJounaiCounts(t);
+    counts[cid]=map[cid].length;
+    if(!map[cid].length){
+      delete map[cid];
+      delete counts[cid];
+    }
+    // 現在セットまで継続していた場内を取り消した場合は稼働中リストからも外す。
+    if(phase<=currentOrderPhase(t))t.jounai=(t.jounai||[]).filter(x=>x!==cid);
+  }else{
+    let left=delQty;
+    map[cid]=phases.filter(p=>{
+      if(left>0 && Number(p)===phase){left--;return false;}
+      return true;
+    });
+    if(!map[cid].length)delete map[cid];
+    // after 配列側も同じ件数だけ減らす。
+    let arr=t[key]||[],remain=delQty,out=[];
+    for(let i=arr.length-1;i>=0;i--){
+      if(remain>0&&arr[i]===cid){remain--;continue;}
+      out.push(arr[i]);
+    }
+    t[key]=out.reverse();
+  }
+  render();
+}
+
 function deleteOperationQty(tableId,key,label){
   let t=state.tables.find(x=>x.id===tableId);
   if(!t)return;
