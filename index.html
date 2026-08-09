@@ -409,7 +409,7 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
   </section>
 
   <section id="manage" class="screen">
-    <div class="row"><h2>管理</h2><button class="btn ok" onclick="startBusinessDay()">営業開始</button><button class="btn blue" onclick="openClosingSheetInput()">締め票入力</button><button class="btn bad" onclick="endBusinessDay()">営業終了</button><button class="btn blue" onclick="makeClosing()">締め票作成</button><button class="btn out" onclick="openHistoryPanel()">履歴</button><button class="btn blue" onclick="openVisitorCountPanel()">入客数</button><button class="btn blue" onclick="openReceiptEditPanel()">伝票修正</button><button class="btn ok admin-only" onclick="generateReceiptEditOtp()">修正権限発行</button><button class="btn out admin-only" onclick="renderReceiptAuditPanel(true)">修正ログ</button><span id="receiptGrantStatus" class="otp-active" style="display:none"></span><button class="btn warn" onclick="openUnpaidPanel()">未収</button><button class="btn warn" onclick="openProfitLock()">利益率</button><button class="btn out" onclick="makeMonthly()">月締め票</button><button class="btn out" onclick="saveBackupManual()">バックアップ保存</button><button class="btn blue" onclick="openScreen('backup')">バックアップを見る</button></div>
+    <div class="row"><h2>管理</h2><button id="manageWeeklyBtn" class="btn blue" onclick="openScreen('weeklyOverview')">週間</button><button class="btn ok" onclick="startBusinessDay()">営業開始</button><button class="btn blue" onclick="openClosingSheetInput()">締め票入力</button><button class="btn bad" onclick="endBusinessDay()">営業終了</button><button class="btn blue" onclick="makeClosing()">締め票作成</button><button class="btn out" onclick="openHistoryPanel()">履歴</button><button class="btn blue" onclick="openVisitorCountPanel()">入客数</button><button class="btn blue" onclick="openReceiptEditPanel()">伝票修正</button><button class="btn ok admin-only" onclick="generateReceiptEditOtp()">修正権限発行</button><button class="btn out admin-only" onclick="renderReceiptAuditPanel(true)">修正ログ</button><span id="receiptGrantStatus" class="otp-active" style="display:none"></span><button class="btn warn" onclick="openUnpaidPanel()">未収</button><button class="btn warn" onclick="openProfitLock()">利益率</button><button class="btn out" onclick="makeMonthly()">月締め票</button><button class="btn out" onclick="saveBackupManual()">バックアップ保存</button><button class="btn blue" onclick="openScreen('backup')">バックアップを見る</button></div>
     <div class="summary" id="manageSummary"></div><div id="visitorCountArea" style="margin-top:12px"></div><div id="receiptAuditArea" class="admin-only" style="display:none;margin-top:12px"></div>
     <div id="profitArea" style="display:none;margin-top:12px"></div>
     <div class="grid2" style="margin-top:12px">
@@ -745,11 +745,13 @@ function applyViewerVisibility(){
   document.querySelectorAll('.screen button').forEach(el=>el.classList.add('viewer-hidden'));
   const allowed=['openHistoryPanel','makeClosing','makeMonthly','makeWeek','makeMonthSheet'];
   document.querySelectorAll('#manage button').forEach(el=>{const oc=el.getAttribute('onclick')||'';if(allowed.some(x=>oc.startsWith(x+'(')))el.classList.remove('viewer-hidden');});
+  document.getElementById('manageWeeklyBtn')?.classList.remove('viewer-hidden');
   document.querySelectorAll('.screen input,.screen select,.screen textarea').forEach(el=>el.disabled=true);
-  ['weekCast','weekDate'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
+  ['weekCast','weekDate','weeklyOverviewDate'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=false;});
+  document.querySelector('#weeklyOverview .row button')?.classList.remove('viewer-hidden');
   document.querySelectorAll('.tabs button,.mobile-bottom-nav button').forEach(el=>{if(['tables','overview','manage'].includes(el.dataset.screen))el.classList.remove('viewer-hidden');});
   const activeScreen=document.querySelector('.screen.active')?.id;
-  if(!['tables','overview','manage'].includes(activeScreen))openScreen('tables');
+  if(!['tables','overview','manage','weeklyOverview'].includes(activeScreen))openScreen('tables');
 }
 function applyAppLock(){
   const lock = document.getElementById('appLock');
