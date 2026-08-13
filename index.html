@@ -1427,20 +1427,21 @@ function syncNonJounaiOperationPhases(t){
 function repairOperationPhases(t){
   if(!t)return;
   syncNonJounaiOperationPhases(t);
-  const all=ensureOperationPhases(t),maxPhase=currentOrderPhase(t),active=new Set(t.jounai||[]),counts=ensureJounaiCounts(t);
-  // 場内は「押したセットから開始し、その後の延長セットへ自動継続」。
-  // 同じキャストは同じセット内で必ず1回までにし、旧重複記録も自動補正する。
-  active.forEach(cid=>{
+  const all=ensureOperationPhases(t),maxPhase=currentOrderPhase(t),counts=ensureJounaiCounts(t);
+  // 場内はセット別の実績履歴を保持する。途中で場内解除されても過去セット分は消さない。
+  // 自動継続は carryActiveJounaiToPhase() が t.jounai（現在場内中）だけに対して行う。
+  const ids=[...new Set([...(t.jounai||[]),...Object.keys(all.jounai||{}),...Object.keys(counts||{})])];
+  ids.forEach(cid=>{
     let raw=Array.isArray(all.jounai[cid])?all.jounai[cid]:[];
     let phases=[...new Set(raw.map(v=>Math.max(0,Math.min(maxPhase,Number(v)||0))))].sort((a,b)=>a-b);
-    let first=phases.length?phases[0]:Math.max(0,Math.min(maxPhase,(Number(counts[cid])||1)-1));
-    phases=[];
-    for(let phase=first;phase<=maxPhase;phase++)phases.push(phase);
-    all.jounai[cid]=phases;
-    counts[cid]=phases.length;
+    // 旧データでフェーズ履歴が無い場合だけ、本数から安全に復元する。
+    if(!phases.length && Number(counts[cid])>0){
+      const n=Math.max(1,Math.min(maxPhase+1,Number(counts[cid])||1));
+      phases=Array.from({length:n},(_,i)=>Math.max(0,maxPhase-n+1+i));
+    }
+    if(phases.length){all.jounai[cid]=phases;counts[cid]=phases.length;}
+    else{delete all.jounai[cid];delete counts[cid];}
   });
-  Object.keys(all.jounai||{}).forEach(cid=>{if(!active.has(cid))delete all.jounai[cid];});
-  Object.keys(counts).forEach(cid=>{if(!active.has(cid))delete counts[cid];});
   // アフターはどの経路から入っても必ず「同一キャスト1回」に正規化する。
   t.after=[...new Set((t.after||[]).filter(Boolean))];
   const afterMap=all.after||(all.after={});
@@ -1802,7 +1803,7 @@ function renderTables(){
   const aTables=state.tables.filter(t=>String(t.id).startsWith('A'));
   tableCards.innerHTML=`<div class="table-row-title">C卓</div><div class="table-row c-row">${cTables.map(tableCard).join('')}</div><div class="table-row-title">A卓</div><div class="table-row a-row">${aTables.map(tableCard).join('')}</div>`;
 let t=state.tables.find(x=>x.id===active)||state.tables[0], c=calc(t,now);
-tablePanel.innerHTML=`<div class="row"><h2>${t.id}</h2><span class="${timeBadge(t,now)}">${t.status==='busy'?'残り'+remain(t,now)+'分':'空席'}</span></div>`+(t.status!=='busy'?`<button class="btn" style="width:100%;padding:18px" onclick="openStart('${t.id}')">入卓設定</button>`:`<div class="grid3"><div class="info"><b>セット</b><span>基本60分</span></div><div class="info"><b>残り</b><span>${remain(t,now)}分</span></div><div class="info"><b>延長</b><span>無制限</span></div></div><div class="grid2" style="margin-top:10px"><button class="btn warn" onclick="openExtensionAdd('${t.id}','half')">ハーフ延長30分</button><button class="btn blue" onclick="openExtensionAdd('${t.id}','full')">フル延長60分</button></div><button class="btn out" style="margin-top:10px;width:100%" onclick="openTimeEdit('${t.id}')">時間を修正</button><div class="grid3" style="margin-top:10px"><div><label>人数</label><input type="number" min="1" value="${t.guests}" onchange="updateTable('${t.id}',{guests:+this.value||1})"></div><div><label>一人分セット料金</label><input type="number" min="0" value="${baseSeatUnit(t)}" onchange="updateTableSetPriceInline('${t.id}',this.value)"><div class="muted" style="font-size:11px;margin-top:4px">合計 ${yen(baseSeat(t))}</div></div><div><label>支払</label><select onchange="updateTable('${t.id}',{payment:this.value})"><option value="cash" ${t.payment==='cash'?'selected':''}>現金</option><option value="card" ${t.payment==='card'?'selected':''}>カード</option></select></div></div><div class="grid3" style="margin-top:10px"><button class="btn" onclick="castDrink('${t.id}')">ドリンク</button><button class="btn out" onclick="simple('${t.id}','beer','ビール',1000)">ビール</button><button class="btn out" onclick="shot('${t.id}')">ショット</button><button class="btn out" onclick="wheel('${t.id}')">テキカン</button><button class="btn out" onclick="champ('${t.id}')">シャンパン</button><button class="btn out" onclick="ops('${t.id}')">指名/同伴</button><button class="btn warn" onclick="openPrepay('${t.id}')">一部入金</button><button class="btn out" onclick="openMove('${t.id}')">卓移動</button><button class="btn out" onclick="openMerge('${t.id}')">卓合体</button></div><div class="section">指名・同伴 追加</div><div class="grid4" style="margin-top:10px"><button class="btn blue" onclick="opCategory('${t.id}','nominations','指名')">指名追加</button><button class="btn blue" onclick="opCategory('${t.id}','dohan','同伴')">同伴追加</button><button class="btn blue" onclick="opCategory('${t.id}','jounai','場内')">場内追加</button><button class="btn blue" onclick="opCategory('${t.id}','after','アフター')">アフター追加</button></div><div class="section">明細</div>${details(t,c)}<div class="grid3" style="margin-top:10px"><button class="btn out" onclick="printReceipt('${t.id}')">伝票発行</button><button class="btn bad" onclick="resetTable('${t.id}')">リセット</button><button class="btn ok" onclick="openCheckout('${t.id}')">会計完了</button></div>`)
+tablePanel.innerHTML=`<div class="row"><h2>${t.id}</h2><span class="${timeBadge(t,now)}">${t.status==='busy'?'残り'+remain(t,now)+'分':'空席'}</span></div>`+(t.status!=='busy'?`<button class="btn" style="width:100%;padding:18px" onclick="openStart('${t.id}')">入卓設定</button>`:`<div class="grid3"><div class="info"><b>セット</b><span>基本60分</span></div><div class="info"><b>残り</b><span>${remain(t,now)}分</span></div><div class="info"><b>延長</b><span>無制限</span></div></div><div class="grid2" style="margin-top:10px"><button class="btn warn" onclick="openExtensionAdd('${t.id}','half')">ハーフ延長30分</button><button class="btn blue" onclick="openExtensionAdd('${t.id}','full')">フル延長60分</button></div><button class="btn out" style="margin-top:10px;width:100%" onclick="openTimeEdit('${t.id}')">時間を修正</button><div class="grid3" style="margin-top:10px"><div><label>人数</label><input type="number" min="1" value="${t.guests}" onchange="updateTable('${t.id}',{guests:+this.value||1})"></div><div><label>一人分セット料金</label><input type="number" min="0" value="${baseSeatUnit(t)}" onchange="updateTableSetPriceInline('${t.id}',this.value)"><div class="muted" style="font-size:11px;margin-top:4px">合計 ${yen(baseSeat(t))}</div></div><div><label>支払</label><select onchange="updateTable('${t.id}',{payment:this.value})"><option value="cash" ${t.payment==='cash'?'selected':''}>現金</option><option value="card" ${t.payment==='card'?'selected':''}>カード</option></select></div></div>${additionalInputLabel(t)?`<div class="card no-print" style="margin-top:10px;border:2px solid #2563eb;background:#eff6ff"><div class="row"><div><b>追加入力モード</b><div class="muted">${additionalInputLabel(t)} に注文を追加します</div></div><button class="btn out small" onclick="stopAdditionalInput('${t.id}')">現在セットに戻す</button></div></div>`:''}<div class="grid3" style="margin-top:10px"><button class="btn" onclick="castDrink('${t.id}')">ドリンク</button><button class="btn out" onclick="simple('${t.id}','beer','ビール',1000)">ビール</button><button class="btn out" onclick="shot('${t.id}')">ショット</button><button class="btn out" onclick="wheel('${t.id}')">テキカン</button><button class="btn out" onclick="champ('${t.id}')">シャンパン</button><button class="btn out" onclick="ops('${t.id}')">指名/同伴</button><button class="btn warn" onclick="openPrepay('${t.id}')">一部入金</button><button class="btn out" onclick="openMove('${t.id}')">卓移動</button><button class="btn out" onclick="openMerge('${t.id}')">卓合体</button></div><div class="section">指名・同伴 追加</div><div class="grid4" style="margin-top:10px"><button class="btn blue" onclick="opCategory('${t.id}','nominations','指名')">指名追加</button><button class="btn blue" onclick="opCategory('${t.id}','dohan','同伴')">同伴追加</button><button class="btn blue" onclick="opCategory('${t.id}','jounai','場内')">場内追加</button><button class="btn blue" onclick="opCategory('${t.id}','after','アフター')">アフター追加</button></div><div class="section">明細</div>${details(t,c)}<div class="grid3" style="margin-top:10px"><button class="btn out" onclick="printReceipt('${t.id}')">伝票発行</button><button class="btn bad" onclick="resetTable('${t.id}')">リセット</button><button class="btn ok" onclick="openCheckout('${t.id}')">会計完了</button></div>`)
 }
 
 function groupedCastCounts(arr){
@@ -1815,7 +1816,7 @@ function operationRowsHtml(t,key,label,unit,repeat){
   return groups.map(g=>{
     let setCount=key==='jounai'?g.count:g.count*(repeat||1);
     let amount=setCount*(Number(unit)||0);
-    let del=`<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deleteOperationQty('${t.id}','${key}','${label}')">数量削除</button></div>`;
+    let del=`<div style="margin-top:4px"><button class="btn out small" onclick="event.stopPropagation();deleteOperationQty('${t.id}','${key}','${label}','${g.id}')">数量削除</button></div>`;
     return `<tr><td>${label} ${esc(cname(g.id))} ×${setCount}${del}</td><td class="right">${yen(amount)}</td></tr>`;
   }).join('');
 }
@@ -1906,6 +1907,10 @@ function details(t,c){
       rows+=`<tr><td>${label}<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${edit}<button class="btn out small" onclick="event.stopPropagation();deleteOrderItem('${t.id}','${i.id}')">数量削除</button></div></td><td class="right">${yen(amount)}</td></tr>`;
     });
     if(rows){allocatedSubtotal+=subtotal;phaseHtml+=`<tr class="order-phase-row"><th colspan="2">${title}</th></tr>${rows}<tr class="order-phase-subtotal"><td>${title} 小計</td><td class="right">${yen(subtotal)}</td></tr>`;}
+    // 現在セットより前のセットは、明細の有無に関係なく必ず追加入力ボタンを表示する。
+    if(phase<phaseCount){
+      phaseHtml+=`<tr class="no-print past-set-add-row"><td colspan="2" style="padding-top:8px;padding-bottom:14px"><button class="btn warn" style="width:100%;padding:12px;font-weight:900;font-size:15px" onclick="event.stopPropagation();startAdditionalInput('${t.id}',${phase})">${orderInputPhase(t)===phase?'✓ '+title+' に追加入力中':title+' に追加入力'}</button></td></tr>`;
+    }
   }
   if(Math.round(allocatedSubtotal)!==Math.round(c.subtotal))console.warn('明細区分小計の不一致', {table:t.id,allocatedSubtotal,subtotal:c.subtotal});
   let totalRows=[['小計',c.subtotal],['TAX',c.tax],['サービス',c.service],['カード',c.card]].filter(x=>x[1]>0);
@@ -1957,22 +1962,25 @@ function deleteOperationPhaseQty(tableId,key,cid,phase,label){
   let phases=Array.isArray(map[cid])?map[cid]:[];
   let available=phases.filter(p=>Number(p)===phase).length;
   if(!available)return;
-  let delQty=askDeleteQty(label,available);
+  let delQty=key==='jounai'?1:askDeleteQty(label,available);
   if(!delQty)return;
   if(!confirm(`${label} ${cname(cid)} を ${delQty} 件削除しますか？`))return;
 
   if(key==='jounai'){
-    // 場内は「付いたセットから以後の延長へ継続」のため、
-    // 途中のセットだけ消すと次の再計算で復活する。クリックしたセット以降を取り消す。
-    map[cid]=phases.filter(p=>Number(p)<phase);
+    // 場内の数量削除は、押したセットの実績を1件ずつだけ削除する。
+    // 前後セットの履歴は一切触らない。
+    let left=Math.min(1,delQty);
+    map[cid]=phases.filter(p=>{
+      if(left>0 && Number(p)===phase){left--;return false;}
+      return true;
+    });
     const counts=ensureJounaiCounts(t);
     counts[cid]=map[cid].length;
-    if(!map[cid].length){
-      delete map[cid];
-      delete counts[cid];
+    if(!map[cid].length){delete map[cid];delete counts[cid];}
+    // 現在セット分を消した場合だけ、現在場内中の状態も解除する。過去分削除では現在状態を変えない。
+    if(Number(phase)===Number(currentOrderPhase(t)) && !(map[cid]||[]).some(p=>Number(p)===Number(phase))){
+      t.jounai=(t.jounai||[]).filter(x=>x!==cid);
     }
-    // 現在セットまで継続していた場内を取り消した場合は稼働中リストからも外す。
-    if(phase<=currentOrderPhase(t))t.jounai=(t.jounai||[]).filter(x=>x!==cid);
   }else{
     let left=delQty;
     map[cid]=phases.filter(p=>{
@@ -1992,17 +2000,29 @@ function deleteOperationPhaseQty(tableId,key,cid,phase,label){
   render();
 }
 
-function deleteOperationQty(tableId,key,label){
+function deleteOperationQty(tableId,key,label,targetCid){
   let t=state.tables.find(x=>x.id===tableId);
   if(!t)return;
   if(key==='jounai'){
-    let groups=jounaiCountGroups(t),total=groups.reduce((a,g)=>a+g.count,0);
-    if(!total)return;
-    let delQty=askDeleteQty(label,total);
-    if(!delQty)return;
-    if(!confirm(`${label} を ${delQty} 件削除しますか？`))return;
-    let counts=ensureJounaiCounts(t),left=delQty;
-    [...groups].reverse().forEach(g=>{if(left<=0)return;let cur=Number(counts[g.id])||0,cut=Math.min(cur,left);counts[g.id]=cur-cut;left-=cut;if(counts[g.id]<=0){delete counts[g.id];t.jounai=(t.jounai||[]).filter(x=>x!==g.id);}});
+    const cid=targetCid;
+    if(!cid)return;
+    const all=ensureOperationPhases(t),map=all.jounai||(all.jounai={}),counts=ensureJounaiCounts(t);
+    let phases=Array.isArray(map[cid])?[...map[cid]]:[];
+    if(!phases.length)return;
+    phases=[...new Set(phases.map(v=>Math.max(0,Number(v)||0)))].sort((a,b)=>a-b);
+    const removedPhase=phases.pop();
+    if(!confirm(`${label} ${cname(cid)} の最新1件だけ削除しますか？`))return;
+    if(phases.length){
+      map[cid]=phases;
+      counts[cid]=phases.length;
+    }else{
+      delete map[cid];
+      delete counts[cid];
+    }
+    // 現在セット分を消した場合は「場内終了」とみなし、次セットへ自動継続しない。
+    if(Number(removedPhase)===Number(currentOrderPhase(t))){
+      t.jounai=(t.jounai||[]).filter(x=>x!==cid);
+    }
     repairOperationPhases(t);
     render();return;
   }
@@ -2309,17 +2329,40 @@ function findTableSafe(id){
   if(t)ensureTableItems(t);
   return t;
 }
-function simple(id,type,name,price){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,target:'guest',orderPhase:phase});render()}
-function addGuestItem(id,type,name,price,qty=1){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let count=Math.max(1,Number(qty)||1);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&i.target==='guest'&&itemOrderPhase(t,i)===phase);f?f.qty=(Number(f.qty||0)+count):items.push({id:uuid(),type,name,price,qty:count,target:'guest',orderPhase:phase});closeModal('selectModal');render()}
+let additionalInputPhases={};
+function orderInputPhase(t){
+  const cur=currentOrderPhase(t);
+  const p=Number(additionalInputPhases[t&&t.id]);
+  return Number.isInteger(p)&&p>=0&&p<cur?p:cur;
+}
+function startAdditionalInput(tableId,phase){
+  const t=findTableSafe(tableId);if(!t)return;
+  phase=Math.max(0,Math.floor(Number(phase)||0));
+  const cur=currentOrderPhase(t);
+  if(phase>=cur){delete additionalInputPhases[tableId];render();return;}
+  additionalInputPhases[tableId]=phase;
+  render();
+}
+function stopAdditionalInput(tableId){
+  delete additionalInputPhases[tableId];
+  render();
+}
+function additionalInputLabel(t){
+  const phase=orderInputPhase(t);
+  if(phase===currentOrderPhase(t))return '';
+  return phase===0?'初回':`${phase}回目延長`;
+}
+function simple(id,type,name,price){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=orderInputPhase(t);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,target:'guest',orderPhase:phase});render()}
+function addGuestItem(id,type,name,price,qty=1){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=orderInputPhase(t);let count=Math.max(1,Number(qty)||1);let f=items.find(i=>i.type===type&&i.name===name&&!i.castId&&i.target==='guest'&&itemOrderPhase(t,i)===phase);f?f.qty=(Number(f.qty||0)+count):items.push({id:uuid(),type,name,price,qty:count,target:'guest',orderPhase:phase});closeModal('selectModal');render()}
 function addGuestItemBulk(id,type,name,price){let qtyEl=document.getElementById('multiGuestQty');let count=Math.max(1,Number(qtyEl?qtyEl.value:1)||1);addGuestItem(id,type,name,price,count)}
-function addCastItem(id,type,name,price,cid,keepOpen=false){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=currentOrderPhase(t);let f=items.find(i=>i.type===type&&i.castId===cid&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,castId:cid,target:'cast',orderPhase:phase});if(!keepOpen)closeModal('selectModal');render()}
+function addCastItem(id,type,name,price,cid,keepOpen=false){let t=findTableSafe(id);if(!t)return;let items=ensureTableItems(t),phase=orderInputPhase(t);let f=items.find(i=>i.type===type&&i.castId===cid&&itemOrderPhase(t,i)===phase);f?f.qty++:items.push({id:uuid(),type,name,price,qty:1,castId:cid,target:'cast',orderPhase:phase});if(!keepOpen)closeModal('selectModal');render()}
 
 function toggleMultiCast(btn){btn.classList.toggle('out');btn.classList.toggle('ok')}
 function selectAllMultiCasts(){document.querySelectorAll('#multiCastPicker button[data-id]').forEach(b=>{b.classList.remove('out');b.classList.add('ok')})}
 function clearAllMultiCasts(){document.querySelectorAll('#multiCastPicker button[data-id]').forEach(b=>{b.classList.remove('ok');b.classList.add('out')})}
 function addCastItemsBulk(id,type,name,price){
   let t=findTableSafe(id);if(!t)return;
-  let items=ensureTableItems(t),phase=currentOrderPhase(t);
+  let items=ensureTableItems(t),phase=orderInputPhase(t);
   let selected=[...document.querySelectorAll('#multiCastPicker .ok')].map(b=>b.dataset.id).filter(Boolean);
   let qtyEl=document.getElementById('multiCastQty');
   let count=Math.max(1,Number(qtyEl?qtyEl.value:1)||1);
@@ -2336,17 +2379,19 @@ function shot(id){selectTitle.textContent='ショット追加先';selectBody.inn
 function castShot(id){selectTitle.textContent='キャストショット';selectBody.innerHTML='<div class="grid4">'+activeCasts().map(c=>`<button class="btn" onclick="addCastItem('${id}','castShot','SB',2000,'${c.id}')">${c.name}</button>`).join('')+'</div>'}
 function wheel(id){selectTitle.textContent='テキカン';selectBody.innerHTML=`<div class="grid2"><button class="btn" onclick="wheelCasts('${id}',12,22000)">12個 ¥22,000</button><button class="btn" onclick="wheelCasts('${id}',24,40000)">24個 ¥40,000</button></div>`;openModal('selectModal')}
 function wheelCasts(id,count,price){selectTitle.textContent=`テキカン${count}`;selectBody.innerHTML=`<div class="grid4" id="wheelCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveWheel('${id}',${count},${price})">追加</button>`}
-function saveWheel(id,count,price){let t=findTableSafe(id);if(!t)return;let phase=currentOrderPhase(t),drinkers=[...wheelCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'wheel',name:'テキカン'+count,price,qty:1,drinkers,wheelCount:count,orderPhase:phase});closeModal('selectModal');render()}
+function saveWheel(id,count,price){let t=findTableSafe(id);if(!t)return;let phase=orderInputPhase(t),drinkers=[...wheelCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'wheel',name:'テキカン'+count,price,qty:1,drinkers,wheelCount:count,orderPhase:phase});closeModal('selectModal');render()}
 function champ(id){let cats=[...new Set(CH.map(c=>c.cat))];selectTitle.textContent='シャンパン';selectBody.innerHTML=cats.map(cat=>`<h3>${cat}</h3><div class="grid3">${CH.filter(c=>c.cat===cat).map(c=>`<button class="btn out" onclick="champCasts('${id}','${c.id}')">${c.name}<br>${yen(c.price)}</button>`).join('')}</div>`).join('');openModal('selectModal')}
 function champCasts(id,cid){let ch=CH.find(c=>c.id===cid);selectTitle.textContent=ch.name;selectBody.innerHTML=`<div class="grid4" id="champCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveChamp('${id}','${cid}')">追加</button>`}
-function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let phase=currentOrderPhase(t),ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid,orderPhase:phase});closeModal('selectModal');render()}
+function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let phase=orderInputPhase(t),ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid,orderPhase:phase});closeModal('selectModal');render()}
 function ops(id){let t=state.tables.find(x=>x.id===id);selectTitle.textContent='指名/同伴/場内/アフター';selectBody.innerHTML=[['nominations','指名'],['dohan','同伴'],['jounai','場内'],['after','アフター']].map(([k,l])=>`<h3>${l}</h3><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOp('${id}','${k}','${c.id}')">${c.name}</button>`).join('')}</div>`).join('');openModal('selectModal')}
 function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);selectTitle.textContent=label+' 追加/解除';let note=k==='after'?'アフターは1卓につきキャスト1人1回までです。緑は登録済みです。':'この画面は何回でも開けます。押すたびに追加/解除します。';selectBody.innerHTML=`<h3>${label}</h3><p class="muted">${note}</p><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
 function toggleOperationValue(t,k,cid){
   let a=t[k]||[],phase=currentOrderPhase(t);
   if(k==='jounai'){
-    if(a.includes(cid)){t[k]=a.filter(x=>x!==cid);let counts=ensureJounaiCounts(t),qty=Number(counts[cid])||0;delete counts[cid];removeOperationPhase(t,'jounai',cid,qty||1);}
-    else{
+    if(a.includes(cid)){
+      // 場内解除は「現在から外す」だけ。過去セットの場内実績・料金は残す。
+      t[k]=a.filter(x=>x!==cid);
+    }else{
       // 先に現在セットへ場内を記録してから、稼働中リストへ追加する。
       // 逆順だと旧データ補正が新規場内を初回セット扱いしてしまう。
       addJounaiCharge(t,cid,1,phase);
