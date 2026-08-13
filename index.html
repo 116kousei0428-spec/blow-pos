@@ -2384,19 +2384,37 @@ function champ(id){let cats=[...new Set(CH.map(c=>c.cat))];selectTitle.textConte
 function champCasts(id,cid){let ch=CH.find(c=>c.id===cid);selectTitle.textContent=ch.name;selectBody.innerHTML=`<div class="grid4" id="champCast">${activeCasts().map(c=>`<button class="btn out" data-id="${c.id}" onclick="this.classList.toggle('out');this.classList.toggle('ok')">${c.name}</button>`).join('')}</div><button class="btn ok" style="margin-top:10px;width:100%" onclick="saveChamp('${id}','${cid}')">追加</button>`}
 function saveChamp(id,cid){let t=findTableSafe(id);if(!t)return;let phase=orderInputPhase(t),ch=CH.find(c=>c.id===cid),drinkers=[...champCast.querySelectorAll('.ok')].map(b=>b.dataset.id);ensureTableItems(t).push({id:uuid(),type:'champagne',name:ch.name,price:ch.price,cost:ch.cost,qty:1,drinkers,champagneId:cid,orderPhase:phase});closeModal('selectModal');render()}
 function ops(id){let t=state.tables.find(x=>x.id===id);selectTitle.textContent='指名/同伴/場内/アフター';selectBody.innerHTML=[['nominations','指名'],['dohan','同伴'],['jounai','場内'],['after','アフター']].map(([k,l])=>`<h3>${l}</h3><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOp('${id}','${k}','${c.id}')">${c.name}</button>`).join('')}</div>`).join('');openModal('selectModal')}
-function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);selectTitle.textContent=label+' 追加/解除';let note=k==='after'?'アフターは1卓につきキャスト1人1回までです。緑は登録済みです。':'この画面は何回でも開けます。押すたびに追加/解除します。';selectBody.innerHTML=`<h3>${label}</h3><p class="muted">${note}</p><div class="grid4">${activeCasts().map(c=>`<button class="btn ${(t[k]||[]).includes(c.id)?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
+function hasOperationAtPhase(t,k,cid,phase){
+  const map=ensureOperationPhases(t)[k]||{};
+  return Array.isArray(map[cid])&&map[cid].some(p=>Number(p)===Number(phase));
+}
+function opCategory(id,k,label){let t=state.tables.find(x=>x.id===id);let phase=(k==='jounai'?orderInputPhase(t):currentOrderPhase(t));let phaseLabel=phase===0?'初回':`${phase}回目延長`;selectTitle.textContent=label+' 追加/解除';let note=k==='after'?'アフターは1卓につきキャスト1人1回までです。緑は登録済みです。':(k==='jounai'?`${phaseLabel} の場内を追加/解除します。各セットごとに独立して登録できます。`:'この画面は何回でも開けます。押すたびに追加/解除します。');selectBody.innerHTML=`<h3>${label}</h3><p class="muted">${note}</p><div class="grid4">${activeCasts().map(c=>{let on=k==='jounai'?hasOperationAtPhase(t,k,c.id,phase):(t[k]||[]).includes(c.id);return `<button class="btn ${on?'ok':'out'}" onclick="toggleOpCategory('${id}','${k}','${c.id}','${label}')">${c.name}</button>`}).join('')||'<div class="muted">表示中キャスト未登録</div>'}</div>`;openModal('selectModal')}
 function toggleOperationValue(t,k,cid){
-  let a=t[k]||[],phase=currentOrderPhase(t);
+  let a=t[k]||[],currentPhase=currentOrderPhase(t),phase=(k==='jounai'?orderInputPhase(t):currentPhase);
   if(k==='jounai'){
-    if(a.includes(cid)){
-      // 場内解除は「現在から外す」だけ。過去セットの場内実績・料金は残す。
+    const all=ensureOperationPhases(t),map=all.jounai||(all.jounai={}),counts=ensureJounaiCounts(t);
+    if(!Array.isArray(map[cid]))map[cid]=[];
+    const exists=map[cid].some(p=>Number(p)===Number(phase));
+    if(phase<currentPhase){
+      // 過去セットへの追加入力は、そのセットの場内実績だけを独立して追加/解除する。
+      // 現在場内中かどうか（t.jounai）は変更しない。
+      if(exists){map[cid]=map[cid].filter(p=>Number(p)!==Number(phase));}
+      else{map[cid].push(phase);}
+      map[cid]=[...new Set(map[cid].map(v=>Math.max(0,Number(v)||0)))].sort((x,y)=>x-y);
+      if(map[cid].length)counts[cid]=map[cid].length;else{delete map[cid];delete counts[cid];}
+      repairOperationPhases(t);
+      return;
+    }
+    // 現在セットでは従来どおり「場内中」のON/OFFも連動させる。
+    if(exists || a.includes(cid)){
+      map[cid]=map[cid].filter(p=>Number(p)!==Number(phase));
+      if(map[cid].length)counts[cid]=map[cid].length;else{delete map[cid];delete counts[cid];}
       t[k]=a.filter(x=>x!==cid);
     }else{
-      // 先に現在セットへ場内を記録してから、稼働中リストへ追加する。
-      // 逆順だと旧データ補正が新規場内を初回セット扱いしてしまう。
       addJounaiCharge(t,cid,1,phase);
-      t[k]=[...a,cid];
+      t[k]=[...new Set([...a,cid])];
     }
+    repairOperationPhases(t);
   }else if(a.includes(cid)){
     t[k]=a.filter(x=>x!==cid);removeOperationPhase(t,k,cid,1);
   }else{
