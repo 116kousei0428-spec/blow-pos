@@ -3117,10 +3117,18 @@ function confirmClockManual(){let id=clockCastId.value,mode=clockMode.value,c=st
 function clockIn(id){openClockManual(id,'in')}function clockOut(id){openClockManual(id,'out')}function clockOutAll(){state.casts.forEach(c=>{if(c.status==='on'){let l=getLog(c);if(!l.in||l.in==='休み')l.in=businessTime10(now,state.businessDate,'ceil',26);l.out=businessTime10(now,state.businessDate,'ceil',26);l.absent=false;delete l.status;c.status='off';setLog(c,state.businessDate,l)}});render()}function editLog(id,f,v){let c=state.casts.find(x=>x.id===id),l=getLog(c),maxHour=f==='out'?26:25;l[f]=normalizeTimeValue(v,'exact',maxHour);l.absent=false;delete l.status;setLog(c,state.businessDate,l);render()}
 function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.out||l.out==='休み')return alert('退勤記録がありません');if(!confirm(`${c.name} の退勤を取り消して出勤中に戻しますか？`))return;l.out='';l.absent=false;delete l.status;c.status=l.in&&l.in!=='休み'?'on':'off';setLog(c,d,l);render()}
 function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;if(c.logs)c.logs[d]={in:'',out:'',absent:false};c.status='off';render()}
-function workMin(c,d){let l=getLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
+function effectiveManualClosingRow(castId,d){
+  return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===castId).sort((a,b)=>new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0))[0]||null;
+}
+function effectiveWorkLog(c,d){
+  const r=effectiveManualClosingRow(c.id,d);
+  if(r&&(r.in||r.out))return {in:r.in||'',out:r.out||'',absent:false,manualClosing:true};
+  return getLog(c,d);
+}
+function workMin(c,d){let l=effectiveWorkLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){return dur(workMin(c,d))}
-function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});(state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
-function wage(c,d){let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
+function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});manualClosingRowsForDate(d).filter(x=>x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
+function wage(c,d){let mr=effectiveManualClosingRow(c.id,d);if(mr&&Number(mr.manualHourly||0)>0)return Number(mr.manualHourly);let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
 function tenMinuteWageUnit(rate){
   const map={2000:340,2500:420,2700:450,2800:470,3000:500};
   rate=Number(rate||0);
@@ -3451,7 +3459,7 @@ function initWeekTotals(){return{dbQty:0,dbBack:0,sbQty:0,sbBack:0,wheelCount:0,
 function addDayToTotals(totals,c,d){let st=stats(c.id,d),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;totals.dbQty+=st.dbQty;totals.dbBack+=st.dbBack;totals.sbQty+=st.sbQty;totals.sbBack+=st.sbBack;totals.wheelCount+=st.wheelCount;totals.wheelBack+=st.wheelBack;totals.champCount+=st.champCount;totals.champBack+=st.champBack;totals.jounai+=st.jounai;totals.jounaiBack+=jounaiBack;totals.nom+=st.nom;totals.nomSet+=st.nomSet;totals.nomSub+=st.nomSub;totals.dohan+=st.dohan;totals.dohanBack+=st.dohanBack;totals.after+=st.after;totals.afterBack+=st.afterBack;totals.labor+=labor;totals.back+=st.back;totals.pay+=labor+st.back;return{st,labor,jounaiBack}}
 function slashWeekRow(){return `<tr><td class="slashCell">／</td>${Array(24).fill('<td class="slashCell">／</td>').join('')}</tr>`}
 function payrollTableHead(){return `<thead><tr><th>日付（曜日）</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB金額</th><th>SB金額</th><th>テキカンB</th><th>シャンパンB</th><th>場内B</th><th>指名セットB</th><th>指名小計B</th><th>同伴B</th><th>アフターB</th><th>バック合計</th><th>日合計</th></tr></thead>`}
-function payrollDayRow(c,d,totals=null){let st=stats(c.id,d),l=getLog(c,d),absent=isAbsentLog(l),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;if(totals){addDayToTotals(totals,c,d)}return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(c,d)}</td><td class="right">${absent?'-':yen(wage(c,d))}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(labor+st.back)}</td></tr>`}
+function payrollDayRow(c,d,totals=null){let st=stats(c.id,d),l=effectiveWorkLog(c,d),absent=isAbsentLog(l),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;if(totals){addDayToTotals(totals,c,d)}return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(c,d)}</td><td class="right">${absent?'-':yen(wage(c,d))}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(labor+st.back)}</td></tr>`}
 function totalsRow(totals){return `<tr><th>合計</th><th></th><th></th><th></th><th></th><th class="right">${yen(totals.labor)}</th><th class="right">${yen(totals.dbBack)}</th><th class="right">${yen(totals.sbBack)}</th><th class="right">${yen(totals.wheelBack)}</th><th class="right">${yen(totals.champBack)}</th><th class="right">${yen(totals.jounaiBack)}</th><th class="right">${yen(totals.nomSet)}</th><th class="right">${yen(totals.nomSub)}</th><th class="right">${yen(totals.dohanBack)}</th><th class="right">${yen(totals.afterBack)}</th><th class="right">${yen(totals.back)}</th><th class="right">${yen(totals.pay)}</th></tr>`}
 function payrollWeekKey(base,castId){return `${castId}|${weekDates(base||state.businessDate).join('|')}`}
 function payrollLockRecord(c,base){state.payrollLocks=state.payrollLocks||{};return state.payrollLocks[payrollWeekKey(base,c.id)]||null}
@@ -4107,9 +4115,12 @@ function printElement(id){
   setTimeout(doPrint, 300);
 }
 
-function manualBackRates(){return{db:300,sb:600,jounai:JOUNAI_BACK,dohan:2000,after:1000};}
-function calcManualBacksFromQty(v){
-  const r=manualBackRates();
+function manualBackRates(c){
+  const bs=castBackSettings(c||{});
+  return{db:Number(bs.dbBack||0),sb:Number(bs.sbBack||0),jounai:Number(bs.jounaiBack||0),dohan:Number(bs.dohanBack||0),after:Number(bs.afterBack||0)};
+}
+function calcManualBacksFromQty(v,c){
+  const r=manualBackRates(c);
   return {
     dbBack:(Number(v.dbQty||0)||0)*r.db,
     sbBack:(Number(v.sbQty||0)||0)*r.sb,
@@ -4183,7 +4194,8 @@ function dayRevenueBreakdown(d){
 }
 function updateManualBackPreview(){
   const v={dbQty:numFrom('manualDbQty'),sbQty:numFrom('manualSbQty'),jounai:numFrom('manualJounai'),dohan:numFrom('manualDohan'),after:numFrom('manualAfter')};
-  const b=calcManualBacksFromQty(v);
+  const cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid);
+  const b=calcManualBacksFromQty(v,c);
   const set=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=yen(val)};
   set('manualDbBackPreview',b.dbBack); set('manualSbBackPreview',b.sbBack); set('manualJounaiBackPreview',b.jounaiBack); set('manualDohanBackPreview',b.dohanBack); set('manualAfterBackPreview',b.afterBack);
 }
@@ -4198,7 +4210,14 @@ function saveManualDayCloseFromForm(d){
 
 let manualClosingEditId=null;
 let manualClosingHourlyTouched=false;
-function manualClosingRowsForDate(d){return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));}
+function manualClosingRowsForDate(d){
+  const latest={};
+  (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).forEach(x=>{
+    const k=x.castId||x.castName||x.id,prev=latest[k];
+    if(!prev||new Date(x.updatedAt||x.createdAt||0)>=new Date(prev.updatedAt||prev.createdAt||0))latest[k]=x;
+  });
+  return Object.values(latest).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));
+}
 function manualClosingCastOptions(selected=''){
   return (state.casts||[]).filter(c=>!isCastHidden(c)).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${c.name}</option>`).join('')||'<option value="">表示中のキャストなし</option>';
 }
@@ -4291,14 +4310,12 @@ function resetManualCastForm(){
 }
 function cancelManualClosingEdit(){resetManualCastForm();}
 function manualPayrollForDate(d){
-  let labor=0,back=0,total=0;
-  manualClosingRowsForDate(d).forEach(r=>{
-    const p=manualRowPayroll(r);
-    labor+=Number(p.timePay||0);
-    back+=Number(p.back||0);
-    total+=Number(p.total||0);
+  let labor=0,back=0;
+  (state.casts||[]).forEach(c=>{
+    labor+=Number(timePay(c,d)||0);
+    back+=Number(stats(c.id,d).back||0);
   });
-  return {labor,back,total};
+  return {labor,back,total:labor+back};
 }
 function updateManualProfitPreview(){
   const box=document.getElementById('manualProfitPreview');if(!box)return;
@@ -4336,9 +4353,9 @@ function saveManualClosingSheet(){
   if(rawIn&&!inTime){alert('出勤時間の形式が違います');return;}
   if(rawOut&&!outTime){alert('退勤時間の形式が違います');return;}
   const qty={dbQty:numFrom('manualDbQty'),sbQty:numFrom('manualSbQty'),jounai:numFrom('manualJounai'),dohan:numFrom('manualDohan'),after:numFrom('manualAfter')};
-  const backs=calcManualBacksFromQty(qty);
+  const backs=calcManualBacksFromQty(qty,cast);
   state.manualClosingSheets=state.manualClosingSheets||[];
-  const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
+  const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):effectiveManualClosingRow(cast.id,d);
   const linkedBase=existing?.linkedBase||operationalCastSnapshot(cast,d);
   const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,manualHourly:numFrom('manualHourly')||manualAutoHourlyFromForm(cast),linkedBase,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
