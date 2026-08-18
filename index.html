@@ -2742,7 +2742,7 @@ function editPastReceipt(saleId){
   let itemRows=(t.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.castId?'（'+esc(cname(i.castId))+'）':((i.target==='guest'||i.type==='guestShot')?'（ゲスト）':'')}</td><td class="right">${yen(i.price)}</td><td class="right">${i.qty||1}</td><td class="right">${yen((+i.price||0)*(+i.qty||1))}</td><td><button class="btn small" onclick="pastChangeItemQty('${saleId}','${i.id}',1)">＋</button> <button class="btn out small" onclick="pastChangeItemQty('${saleId}','${i.id}',-1)">－</button> <button class="btn bad small" onclick="pastDeleteItemQty('${saleId}','${i.id}')">数量削除</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">追加注文なし</td></tr>';
   selectTitle.textContent=`過去伝票修正 ${t.id}`;
   let cashEdit=sale.table.payment==='cash'?`<div><label>預かり金</label><input type="number" value="${sale.cashReceived||0}" onchange="updatePastCashReceived('${saleId}',this.value)"></div><div class="info"><b>おつり</b><span>${yen(Math.max(0,(+sale.cashReceived||0)-(+c.total||0)))}</span></div>`:`<div class="info"><b>預かり金</b><span>現金会計のみ</span></div><div class="info"><b>おつり</b><span>-</span></div>`;
-  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid2"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
+  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid3"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div><div><label>場内セット</label><select id="pastJounaiPhase">${pastJounaiPhaseOptions(t)}</select></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
   openModal('selectModal');
 }
 function updatePastBaseCharge(saleId,value){
@@ -2771,21 +2771,65 @@ function updatePastCashReceived(saleId,value){
 }
 function pastSelectedCast(){return document.getElementById('pastCastSelect')?.value||'';}
 function pastAddQty(){return Math.max(1,Math.floor(+document.getElementById('pastAddQty')?.value||1));}
+function pastJounaiPhase(){
+  const el=document.getElementById('pastJounaiPhase');
+  return el?Math.max(0,Number(el.value)||0):0;
+}
+function pastJounaiPhaseOptions(t){
+  const max=currentOrderPhase(t);
+  return Array.from({length:max+1},(_,p)=>`<option value="${p}">${p===0?'初回':`${p}回目延長`}</option>`).join('');
+}
+
 function pastAddOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
   if(!sale||!cid)return alert('キャストを選択してください');
-  const before=saleAuditView(sale); sale.table[key]=sale.table[key]||[];
-  for(let i=0;i<pastAddQty();i++) sale.table[key].push(cid);
+  const before=saleAuditView(sale),t=sale.table;
+  if(key==='jounai'){
+    repairOperationPhases(t);
+    const start=Math.min(currentOrderPhase(t),pastJounaiPhase()),max=currentOrderPhase(t);
+    t.jounai=t.jounai||[];
+    for(let q=0;q<pastAddQty();q++){
+      for(let phase=start;phase<=max;phase++)addJounaiCharge(t,cid,1,phase);
+    }
+    const phases=ensureOperationPhases(t).jounai[cid]||[];
+    ensureJounaiCounts(t)[cid]=phases.length;
+    if(phases.some(p=>Number(p)===max) && !t.jounai.includes(cid))t.jounai.push(cid);
+    repairOperationPhases(t);
+  }else{
+    t[key]=t[key]||[];
+    for(let i=0;i<pastAddQty();i++)t[key].push(cid);
+  }
   recalcPastSale(sale); logReceiptMutation(sale,before,'指名等追加'); render(); editPastReceipt(saleId);
 }
 function pastRemoveOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
-  if(!sale||!sale.table[key]||!sale.table[key].length)return;
-  const before=saleAuditView(sale); let qty=pastAddQty();
-  for(let i=0;i<qty;i++){
-    let idx=cid?sale.table[key].lastIndexOf(cid):-1;
-    if(idx<0) idx=sale.table[key].length-1;
-    if(idx>=0) sale.table[key].splice(idx,1);
+  if(!sale||!sale.table)return;
+  const before=saleAuditView(sale),t=sale.table; let qty=pastAddQty();
+  if(key==='jounai'){
+    repairOperationPhases(t);
+    const phase=Math.min(currentOrderPhase(t),pastJounaiPhase());
+    const map=ensureOperationPhases(t).jounai||(ensureOperationPhases(t).jounai={});
+    const targetCid=cid&&Array.isArray(map[cid])?cid:Object.keys(map).find(id=>(map[id]||[]).some(p=>Number(p)===phase));
+    if(!targetCid)return;
+    let phases=Array.isArray(map[targetCid])?map[targetCid]:[];
+    for(let i=0;i<qty;i++){
+      const idx=phases.findIndex(p=>Number(p)===phase);
+      if(idx>=0)phases.splice(idx,1);
+    }
+    if(phases.length)map[targetCid]=phases; else delete map[targetCid];
+    const counts=ensureJounaiCounts(t);
+    if(phases.length)counts[targetCid]=phases.length; else delete counts[targetCid];
+    if(phase===currentOrderPhase(t) && !phases.some(p=>Number(p)===phase)){
+      t.jounai=(t.jounai||[]).filter(id=>id!==targetCid);
+    }
+    repairOperationPhases(t);
+  }else{
+    if(!t[key]||!t[key].length)return;
+    for(let i=0;i<qty;i++){
+      let idx=cid?t[key].lastIndexOf(cid):-1;
+      if(idx<0)idx=t[key].length-1;
+      if(idx>=0)t[key].splice(idx,1);
+    }
   }
   recalcPastSale(sale); logReceiptMutation(sale,before,'指名等削除'); render(); editPastReceipt(saleId);
 }
