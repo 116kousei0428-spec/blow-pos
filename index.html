@@ -852,7 +852,7 @@ function scheduleAutoCloudSave(json=''){
   const current=json||JSON.stringify(stateForLocalStorage());
   const sig=simpleHash(current); if(sig===lastLocalStateJson)return;
   clearTimeout(autoSyncTimer);
-  autoSyncTimer=setTimeout(()=>autoCloudSave(current,sig),700);
+  autoSyncTimer=setTimeout(()=>{autoSyncTimer=null;autoCloudSave(current,sig)},700);
 }
 async function autoCloudSave(json,sig){
   if(applyingRemoteState||!cloudWriteEnabled||!isAutoSyncEnabled())return;
@@ -862,7 +862,7 @@ async function autoCloudSave(json,sig){
   try{
     const payload=cloudStatePayload(cfg);
     payload.syncRevision=Date.now();
-    payload.stateSignature=sig||simpleHash(json||JSON.stringify(stateForLocalStorage()));
+    payload.stateSignature=simpleHash(JSON.stringify(payload.state));
     const res=await fetch(buildCloudEndpoint(cfg),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const text=await res.text(); if(!res.ok)throw new Error('自動保存失敗 HTTP '+res.status+' '+text);
     lastLocalStateJson=payload.stateSignature; lastRemoteSignature=payload.stateSignature; lastRemoteUpdatedAt=payload.syncRevision;
@@ -925,7 +925,10 @@ function mergeManualClosingDayRecords(localRows,remoteRows){
 }
 async function pollCloudChanges(){
   if(autoSyncBusy||applyingRemoteState||!isAutoSyncEnabled()||document.hidden)return;
+  // ローカル変更がFirebase送信待ちなら、古いクラウドstateで卓を巻き戻さない。
+  if(autoSyncTimer||pendingAutoSave)return;
   const cfg=getCloudConfig(); if(!cloudConfigReady(cfg))return;
+  const localSigAtPollStart=simpleHash(JSON.stringify(stateForLocalStorage()));
   autoSyncBusy=true;
   try{
     const res=await fetch(buildCloudEndpoint(cfg),{method:'GET',cache:'no-store'});
@@ -939,6 +942,15 @@ async function pollCloudChanges(){
     const remoteTs=Number(data.syncRevision||Date.parse(data.updatedAt)||0);
     const remoteSig=data.stateSignature||simpleHash(JSON.stringify(nextState));
     const localSig=simpleHash(JSON.stringify(stateForLocalStorage()));
+
+    // Firebase GET開始後に注文・場内・延長・人数変更などが入った場合、
+    // 取得済みの古いremote stateを適用すると直前入力が消えるため、この回の読込を捨てて先にローカルを送信する。
+    if(localSig!==localSigAtPollStart || autoSyncTimer || pendingAutoSave || (lastLocalStateJson && localSig!==lastLocalStateJson)){
+      lastLocalStateJson='';
+      scheduleAutoCloudSave(JSON.stringify(stateForLocalStorage()));
+      setCloudStatus('自動同期中\n端末の直前入力を保護して送信中…');
+      return;
+    }
     if(remoteSig===localSig){
       lastLocalStateJson=localSig;lastRemoteSignature=remoteSig;lastRemoteUpdatedAt=Math.max(lastRemoteUpdatedAt,remoteTs);cloudHydrated=true;cloudWriteEnabled=true;
       if(applyOneTimeVisitorHistoryCleanup()){
@@ -1072,7 +1084,7 @@ function cloudStatePayload(cfg){
   if(!Array.isArray(cleanState.tables)||!cleanState.tables.length)throw new Error('卓データが空のため保存を中止しました');
   return {
     app:'Blow2nd_POS',
-    version:'v2.0_beta57_sync_fix',
+    version:'v2.0_beta57_order_loss_guard',
     backupVersion:1,
     updatedAt:new Date().toISOString(),
     device:cfg.device||'unknown-device',
