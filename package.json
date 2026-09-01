@@ -1,0 +1,11 @@
+{
+  "name": "autotrade-ai-v1",
+  "version": "0.1.1",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
