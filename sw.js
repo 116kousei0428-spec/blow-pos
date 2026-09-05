@@ -1,9 +1,9 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v3';
+const CACHE_NAME = 'blow-amami-pos-mobile-v4-appicon';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+  './amami-icon-192.png',
+  './amami-icon-512.png'
 ];
 
 self.addEventListener('install', event => {
