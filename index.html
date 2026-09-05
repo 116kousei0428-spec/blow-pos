@@ -527,7 +527,11 @@ body.viewer-mode input:disabled,body.viewer-mode select:disabled,body.viewer-mod
   <div class="grid3" style="margin-top:10px">
     <div class="info"><b>料金区分</b><span id="extensionAddRateLabel">-</span></div>
     <div class="info"><b>人数</b><span id="extensionAddGuests">-</span></div>
-    <div class="info"><b>追加料金</b><span id="extensionAddPrice">-</span></div>
+    <div class="info"><b>通常追加料金</b><span id="extensionAddPrice">-</span></div>
+  </div>
+  <div class="grid2" style="margin-top:10px">
+    <div><label>1人あたり延長セット料金</label><input id="extensionAddUnitPrice" type="number" min="0" step="100" oninput="this.dataset.manual='1';updateExtensionAddPreview()"><div class="muted" style="font-size:11px;margin-top:4px">通常料金を自動入力。ハーフ2,000円も必要な時だけ書き換えできます。</div></div>
+    <div class="info"><b>今回の延長合計</b><span id="extensionAddFinalPrice">-</span></div>
   </div>
   <div class="grid2" style="margin-top:10px">
     <button class="btn out" onclick="setExtensionAddNow()">現在時刻にする</button>
@@ -861,6 +865,11 @@ async function autoCloudSave(json,sig){
   autoSyncBusy=true;
   try{
     const payload=cloudStatePayload(cfg);
+    if(!hasMeaningfulPosData(payload.state)){
+      cloudWriteEnabled=false;
+      setCloudStatus('空データ送信を遮断しました。\nクラウドは上書きしていません。',true);
+      return;
+    }
     payload.syncRevision=Date.now();
     payload.stateSignature=sig||simpleHash(json||JSON.stringify(stateForLocalStorage()));
     const res=await fetch(buildCloudEndpoint(cfg),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -931,9 +940,9 @@ async function pollCloudChanges(){
     const res=await fetch(buildCloudEndpoint(cfg),{method:'GET',cache:'no-store'});
     const text=await res.text(); if(!res.ok)throw new Error('自動読込失敗 HTTP '+res.status+' '+text);
     const data=text?JSON.parse(text):null; const nextState=data&&(data.state||data.data);
-    if(!nextState){
+    if(!nextState || !hasMeaningfulPosData(nextState)){
       cloudHydrated=false; cloudWriteEnabled=false;
-      setCloudStatus('Firebase側に母体データがありません。端末データの自動送信は停止しています。',true);
+      setCloudStatus('Firebase側が空/初期状態です。\n端末への適用もクラウドへの自動送信も停止しました。',true);
       return;
     }
     const remoteTs=Number(data.syncRevision||Date.parse(data.updatedAt)||0);
@@ -1072,7 +1081,7 @@ function cloudStatePayload(cfg){
   if(!Array.isArray(cleanState.tables)||!cleanState.tables.length)throw new Error('卓データが空のため保存を中止しました');
   return {
     app:'Blow2nd_POS',
-    version:'v2.0_beta57_sync_fix',
+    version:'v2.0_beta57_amami_pwa_sync_safe',
     backupVersion:1,
     updatedAt:new Date().toISOString(),
     device:cfg.device||'unknown-device',
@@ -1082,11 +1091,34 @@ function cloudStatePayload(cfg){
     data:cleanState
   };
 }
+
+// 種子島版と同じ空データ上書き防止ガード。奄美固有の同期・締め票マージ処理はそのまま使う。
+function hasMeaningfulPosData(src){
+  if(!src||typeof src!=='object')return false;
+  const arrayKeys=['casts','sales','expenses','cashFlows','closings','orderDeleteLogs','businessSheets','unpaids','manualClosingSheets','manualClosingDaySheets','visitorEntries','migrationArchive'];
+  if(arrayKeys.some(k=>Array.isArray(src[k])&&src[k].length>0))return true;
+  if(Array.isArray(src.tables)&&src.tables.some(t=>{
+    if(!t||typeof t!=='object')return false;
+    if(t.status==='busy'||t.open===true||t.startedAt||t.startTime)return true;
+    const tk=['orders','extensions','operations','nominations','casts','visitors','items','prepayments'];
+    return tk.some(k=>Array.isArray(t[k])&&t[k].length>0);
+  }))return true;
+  if(src.businessOpen===true||src.businessStartedAt)return true;
+  if(src.pastBusinessInput&&typeof src.pastBusinessInput==='object'&&Object.keys(src.pastBusinessInput).length>0)return true;
+  if(src.payrollLocks&&typeof src.payrollLocks==='object'&&Object.keys(src.payrollLocks).length>0)return true;
+  return false;
+}
+
 async function cloudSave(){if(isViewer){alert('社長閲覧モードでは保存できません');return;}
   const cfg=saveCloudConfig();
   try{
     save();
     const payload=cloudStatePayload(cfg);
+    if(!hasMeaningfulPosData(payload.state)){
+      setCloudStatus('空データの手動保存を遮断しました。\nクラウドは上書きしていません。',true);
+      alert('空データはクラウドへ保存できません。既存クラウドは上書きされません。');
+      return;
+    }
     payload.syncRevision=Date.now();
     payload.stateSignature=simpleHash(JSON.stringify(payload.state));
     setCloudStatus('クラウド保存中...');
@@ -1110,7 +1142,7 @@ async function cloudLoad(){
     if(!res.ok)throw new Error('読込失敗 HTTP '+res.status+' '+text);
     const data=text?JSON.parse(text):null;
     const nextState=data && (data.state||data.data);
-    if(!nextState)throw new Error('クラウドにPOSデータがありません');
+    if(!nextState || !hasMeaningfulPosData(nextState))throw new Error('奄美クラウドが空/初期状態のため読込を遮断しました');
     const info='更新: '+(data.updatedAt?new Date(data.updatedAt).toLocaleString():'不明')+'\n端末: '+(data.device||'不明')+'\n営業日: '+(data.businessDate||nextState.businessDate||'-');
     if(!confirm('クラウドデータでこの端末のPOSを上書きします。\n\n'+info+'\n\n先にローカルバックアップを作成して続行しますか？')){setCloudStatus('読込をキャンセルしました。');return;}
     createAutoBackup('クラウド読込前退避');
@@ -1138,7 +1170,8 @@ async function cloudCheck(){
     const text=await res.text();
     if(!res.ok)throw new Error('接続失敗 HTTP '+res.status+' '+text);
     const data=text?JSON.parse(text):null;
-    setCloudStatus(data&&(data.state||data.data)?'接続OK。\nクラウド更新: '+(data.updatedAt?new Date(data.updatedAt).toLocaleString():'不明')+'\n端末: '+(data.device||'-'):'接続OK。まだPOSデータは保存されていません。');
+    const checkedState=data&&(data.state||data.data);
+    setCloudStatus(checkedState&&hasMeaningfulPosData(checkedState)?'接続OK。\nクラウド更新: '+(data.updatedAt?new Date(data.updatedAt).toLocaleString():'不明')+'\n端末: '+(data.device||'-'):'接続OK。奄美の母体データは空/初期状態です。');
   }catch(e){setCloudStatus('接続確認エラー: '+(e.message||e),true)}
 }
 function exportCloudConfig(){
@@ -1328,14 +1361,14 @@ function baseSeatUnit(t){if(!t.startedAt)return 0;if(t.baseSeatUnitOverride!==un
 function baseSeat(t){return baseSeatUnit(t)*(Number(t.guests)||1)}
 function effectiveExtensionPrice(t,item){
   if(!item||item.type!=='extension')return Number(item&&item.price)||0;
-  if(extensionItemKind(item)==='half')return 2000*(Number(t&&t.guests)||1);
+  if(extensionItemKind(item)==='half'&&!item.manualExtensionPrice)return 2000*(Number(t&&t.guests)||1);
   return Number(item.price)||0;
 }
 function normalizeHalfExtensionPricesInTable(t){
   if(!t||!Array.isArray(t.items))return false;
   let changed=false,total=2000*(Number(t.guests)||1);
   t.items.forEach(i=>{
-    if(i&&i.type==='extension'&&extensionItemKind(i)==='half'&&Number(i.price)!==total){i.kind='half';i.price=total;i.manualExtensionPrice=false;i.manualExtensionUnitPrice='';changed=true;}
+    if(i&&i.type==='extension'&&extensionItemKind(i)==='half'&&!i.manualExtensionPrice&&Number(i.price)!==total){i.kind='half';i.price=total;i.manualExtensionUnitPrice='';changed=true;}
   });
   return changed;
 }
@@ -1503,15 +1536,16 @@ function carryActiveJounaiToPhase(t,phase){
     counts[cid]=map[cid].length;
   });
 }
-function addExtension(id,kind,manualStartAt){
+function addExtension(id,kind,manualStartAt,manualUnitPrice=null){
   let t=state.tables.find(x=>x.id===id);if(!t||t.status!=='busy')return;
   normalizeOrderPhases(t);
   let phase=currentOrderPhase(t)+1;
   let isHalf=kind==='half',min=isHalf?HALF_EXTEND_MIN:FULL_EXTEND_MIN;
   let extStart=manualStartAt?new Date(manualStartAt):extensionStartAt(t),chargeAt=extStart;
-  let price=extensionPrice(kind,chargeAt,t.guests);
+  let autoUnit=extensionPrice(kind,chargeAt,1),unitPrice=manualUnitPrice===null||manualUnitPrice===''?autoUnit:Math.max(0,Number(manualUnitPrice)||0);
+  let price=unitPrice*(Number(t.guests)||1),manual=unitPrice!==autoUnit;
   t.serviceMinutes=(t.serviceMinutes||BASIC_SET_MIN)+min;
-  t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,orderPhase:phase,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});
+  t.items.push({id:uuid(),type:'extension',kind,name:isHalf?'ハーフ延長30分':'フル延長60分',price,qty:1,manualExtensionPrice:manual,manualExtensionUnitPrice:manual?unitPrice:'',orderPhase:phase,extensionStartAt:extStart.toISOString(),extensionChargeAt:chargeAt.toISOString()});
   // 延長確定時点で、現在場内中のキャストを次セットへ必ず1回だけ自動継続する。
   carryActiveJounaiToPhase(t,phase);
   repairOperationPhases(t);
@@ -1527,6 +1561,7 @@ function openExtensionAdd(tableId,kind){
   extensionAddDate.value=businessDateForClock(dt,state.businessDate);
   setTimePickerMax('extensionAddTime',26);
   setTimeInput('extensionAddTime',businessClockValue(dt,state.businessDate,'floor',26),25);
+  if(document.getElementById('extensionAddUnitPrice')){extensionAddUnitPrice.dataset.manual='';extensionAddUnitPrice.value='';}
   updateExtensionAddPreview();
   openModal('extensionAddModal');
 }
@@ -1538,12 +1573,17 @@ function updateExtensionAddPreview(){
   if(extensionAddTime.value)setTimeInput('extensionAddTime',editTime,26);
   let dt=(extensionAddDate.value&&editTime)?parseBusinessDT(extensionAddDate.value,editTime):extensionStartAt(t);
   let min=kind==='half'?HALF_EXTEND_MIN:FULL_EXTEND_MIN;
-  let price=extensionPrice(kind,dt,t.guests);
+  let guests=Number(t.guests)||1,autoUnit=extensionPrice(kind,dt,1);
+  let unitEl=document.getElementById('extensionAddUnitPrice');
+  if(unitEl&&!unitEl.dataset.manual)unitEl.value=autoUnit;
+  let unitPrice=unitEl?Math.max(0,Number(unitEl.value)||0):autoUnit;
+  let price=unitPrice*guests;
   extensionAddKindLabel.textContent=kind==='half'?'ハーフ延長':'フル延長';
   extensionAddMinutes.textContent=min+'分';
   extensionAddRateLabel.textContent=extensionRateLabelAt(dt);
-  extensionAddGuests.textContent=(t.guests||1)+'名';
-  extensionAddPrice.textContent=yen(price);
+  extensionAddGuests.textContent=guests+'名';
+  extensionAddPrice.textContent=yen(autoUnit*guests);
+  if(document.getElementById('extensionAddFinalPrice'))extensionAddFinalPrice.textContent=yen(price);
 }
 function setExtensionAddNow(){
   extensionAddDate.value=state.businessDate;
@@ -1557,7 +1597,9 @@ function confirmExtensionAdd(){
   let editTime=normalizeTimeValue(extensionAddTime.value,'exact',26);
   if(!isExtensionStartAllowed(editTime)){alert('延長開始は24:30までです。');return;}
   let dt=parseBusinessDT(extensionAddDate.value,editTime);
-  addExtension(tableId,kind,dt);
+  let unitEl=document.getElementById('extensionAddUnitPrice');
+  let unitPrice=unitEl?Math.max(0,Number(unitEl.value)||0):null;
+  addExtension(tableId,kind,dt,unitPrice);
   closeModal('extensionAddModal');
 }
 
@@ -2742,7 +2784,7 @@ function editPastReceipt(saleId){
   let itemRows=(t.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.castId?'（'+esc(cname(i.castId))+'）':((i.target==='guest'||i.type==='guestShot')?'（ゲスト）':'')}</td><td class="right">${yen(i.price)}</td><td class="right">${i.qty||1}</td><td class="right">${yen((+i.price||0)*(+i.qty||1))}</td><td><button class="btn small" onclick="pastChangeItemQty('${saleId}','${i.id}',1)">＋</button> <button class="btn out small" onclick="pastChangeItemQty('${saleId}','${i.id}',-1)">－</button> <button class="btn bad small" onclick="pastDeleteItemQty('${saleId}','${i.id}')">数量削除</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">追加注文なし</td></tr>';
   selectTitle.textContent=`過去伝票修正 ${t.id}`;
   let cashEdit=sale.table.payment==='cash'?`<div><label>預かり金</label><input type="number" value="${sale.cashReceived||0}" onchange="updatePastCashReceived('${saleId}',this.value)"></div><div class="info"><b>おつり</b><span>${yen(Math.max(0,(+sale.cashReceived||0)-(+c.total||0)))}</span></div>`:`<div class="info"><b>預かり金</b><span>現金会計のみ</span></div><div class="info"><b>おつり</b><span>-</span></div>`;
-  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid2"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
+  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid3"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div><div><label>場内セット</label><select id="pastJounaiPhase">${pastJounaiPhaseOptions(t)}</select></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
   openModal('selectModal');
 }
 function updatePastBaseCharge(saleId,value){
@@ -2771,21 +2813,65 @@ function updatePastCashReceived(saleId,value){
 }
 function pastSelectedCast(){return document.getElementById('pastCastSelect')?.value||'';}
 function pastAddQty(){return Math.max(1,Math.floor(+document.getElementById('pastAddQty')?.value||1));}
+function pastJounaiPhase(){
+  const el=document.getElementById('pastJounaiPhase');
+  return el?Math.max(0,Number(el.value)||0):0;
+}
+function pastJounaiPhaseOptions(t){
+  const max=currentOrderPhase(t);
+  return Array.from({length:max+1},(_,p)=>`<option value="${p}">${p===0?'初回':`${p}回目延長`}</option>`).join('');
+}
+
 function pastAddOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
   if(!sale||!cid)return alert('キャストを選択してください');
-  const before=saleAuditView(sale); sale.table[key]=sale.table[key]||[];
-  for(let i=0;i<pastAddQty();i++) sale.table[key].push(cid);
+  const before=saleAuditView(sale),t=sale.table;
+  if(key==='jounai'){
+    repairOperationPhases(t);
+    const start=Math.min(currentOrderPhase(t),pastJounaiPhase()),max=currentOrderPhase(t);
+    t.jounai=t.jounai||[];
+    for(let q=0;q<pastAddQty();q++){
+      for(let phase=start;phase<=max;phase++)addJounaiCharge(t,cid,1,phase);
+    }
+    const phases=ensureOperationPhases(t).jounai[cid]||[];
+    ensureJounaiCounts(t)[cid]=phases.length;
+    if(phases.some(p=>Number(p)===max) && !t.jounai.includes(cid))t.jounai.push(cid);
+    repairOperationPhases(t);
+  }else{
+    t[key]=t[key]||[];
+    for(let i=0;i<pastAddQty();i++)t[key].push(cid);
+  }
   recalcPastSale(sale); logReceiptMutation(sale,before,'指名等追加'); render(); editPastReceipt(saleId);
 }
 function pastRemoveOp(saleId,key){
   let sale=state.sales.find(s=>s.id===saleId),cid=pastSelectedCast();
-  if(!sale||!sale.table[key]||!sale.table[key].length)return;
-  const before=saleAuditView(sale); let qty=pastAddQty();
-  for(let i=0;i<qty;i++){
-    let idx=cid?sale.table[key].lastIndexOf(cid):-1;
-    if(idx<0) idx=sale.table[key].length-1;
-    if(idx>=0) sale.table[key].splice(idx,1);
+  if(!sale||!sale.table)return;
+  const before=saleAuditView(sale),t=sale.table; let qty=pastAddQty();
+  if(key==='jounai'){
+    repairOperationPhases(t);
+    const phase=Math.min(currentOrderPhase(t),pastJounaiPhase());
+    const map=ensureOperationPhases(t).jounai||(ensureOperationPhases(t).jounai={});
+    const targetCid=cid&&Array.isArray(map[cid])?cid:Object.keys(map).find(id=>(map[id]||[]).some(p=>Number(p)===phase));
+    if(!targetCid)return;
+    let phases=Array.isArray(map[targetCid])?map[targetCid]:[];
+    for(let i=0;i<qty;i++){
+      const idx=phases.findIndex(p=>Number(p)===phase);
+      if(idx>=0)phases.splice(idx,1);
+    }
+    if(phases.length)map[targetCid]=phases; else delete map[targetCid];
+    const counts=ensureJounaiCounts(t);
+    if(phases.length)counts[targetCid]=phases.length; else delete counts[targetCid];
+    if(phase===currentOrderPhase(t) && !phases.some(p=>Number(p)===phase)){
+      t.jounai=(t.jounai||[]).filter(id=>id!==targetCid);
+    }
+    repairOperationPhases(t);
+  }else{
+    if(!t[key]||!t[key].length)return;
+    for(let i=0;i<qty;i++){
+      let idx=cid?t[key].lastIndexOf(cid):-1;
+      if(idx<0)idx=t[key].length-1;
+      if(idx>=0)t[key].splice(idx,1);
+    }
   }
   recalcPastSale(sale); logReceiptMutation(sale,before,'指名等削除'); render(); editPastReceipt(saleId);
 }
@@ -3117,10 +3203,18 @@ function confirmClockManual(){let id=clockCastId.value,mode=clockMode.value,c=st
 function clockIn(id){openClockManual(id,'in')}function clockOut(id){openClockManual(id,'out')}function clockOutAll(){state.casts.forEach(c=>{if(c.status==='on'){let l=getLog(c);if(!l.in||l.in==='休み')l.in=businessTime10(now,state.businessDate,'ceil',26);l.out=businessTime10(now,state.businessDate,'ceil',26);l.absent=false;delete l.status;c.status='off';setLog(c,state.businessDate,l)}});render()}function editLog(id,f,v){let c=state.casts.find(x=>x.id===id),l=getLog(c),maxHour=f==='out'?26:25;l[f]=normalizeTimeValue(v,'exact',maxHour);l.absent=false;delete l.status;setLog(c,state.businessDate,l);render()}
 function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.out||l.out==='休み')return alert('退勤記録がありません');if(!confirm(`${c.name} の退勤を取り消して出勤中に戻しますか？`))return;l.out='';l.absent=false;delete l.status;c.status=l.in&&l.in!=='休み'?'on':'off';setLog(c,d,l);render()}
 function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;if(c.logs)c.logs[d]={in:'',out:'',absent:false};c.status='off';render()}
-function workMin(c,d){let l=getLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
+function effectiveManualClosingRow(castId,d){
+  return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===castId).sort((a,b)=>new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0))[0]||null;
+}
+function effectiveWorkLog(c,d){
+  const r=effectiveManualClosingRow(c.id,d);
+  if(r&&(r.in||r.out))return {in:r.in||'',out:r.out||'',absent:false,manualClosing:true};
+  return getLog(c,d);
+}
+function workMin(c,d){let l=effectiveWorkLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){return dur(workMin(c,d))}
-function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});(state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
-function wage(c,d){let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
+function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[];if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=i.price*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=i.price*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});manualClosingRowsForDate(d).filter(x=>x.castId===cid).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
+function wage(c,d){let mr=effectiveManualClosingRow(c.id,d);if(mr&&Number(mr.manualHourly||0)>0)return Number(mr.manualHourly);let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
 function tenMinuteWageUnit(rate){
   const map={2000:340,2500:420,2700:450,2800:470,3000:500};
   rate=Number(rate||0);
@@ -3451,7 +3545,7 @@ function initWeekTotals(){return{dbQty:0,dbBack:0,sbQty:0,sbBack:0,wheelCount:0,
 function addDayToTotals(totals,c,d){let st=stats(c.id,d),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;totals.dbQty+=st.dbQty;totals.dbBack+=st.dbBack;totals.sbQty+=st.sbQty;totals.sbBack+=st.sbBack;totals.wheelCount+=st.wheelCount;totals.wheelBack+=st.wheelBack;totals.champCount+=st.champCount;totals.champBack+=st.champBack;totals.jounai+=st.jounai;totals.jounaiBack+=jounaiBack;totals.nom+=st.nom;totals.nomSet+=st.nomSet;totals.nomSub+=st.nomSub;totals.dohan+=st.dohan;totals.dohanBack+=st.dohanBack;totals.after+=st.after;totals.afterBack+=st.afterBack;totals.labor+=labor;totals.back+=st.back;totals.pay+=labor+st.back;return{st,labor,jounaiBack}}
 function slashWeekRow(){return `<tr><td class="slashCell">／</td>${Array(24).fill('<td class="slashCell">／</td>').join('')}</tr>`}
 function payrollTableHead(){return `<thead><tr><th>日付（曜日）</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB金額</th><th>SB金額</th><th>テキカンB</th><th>シャンパンB</th><th>場内B</th><th>指名セットB</th><th>指名小計B</th><th>同伴B</th><th>アフターB</th><th>バック合計</th><th>日合計</th></tr></thead>`}
-function payrollDayRow(c,d,totals=null){let st=stats(c.id,d),l=getLog(c,d),absent=isAbsentLog(l),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;if(totals){addDayToTotals(totals,c,d)}return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(c,d)}</td><td class="right">${absent?'-':yen(wage(c,d))}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(labor+st.back)}</td></tr>`}
+function payrollDayRow(c,d,totals=null){let st=stats(c.id,d),l=effectiveWorkLog(c,d),absent=isAbsentLog(l),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;if(totals){addDayToTotals(totals,c,d)}return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(c,d)}</td><td class="right">${absent?'-':yen(wage(c,d))}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(labor+st.back)}</td></tr>`}
 function totalsRow(totals){return `<tr><th>合計</th><th></th><th></th><th></th><th></th><th class="right">${yen(totals.labor)}</th><th class="right">${yen(totals.dbBack)}</th><th class="right">${yen(totals.sbBack)}</th><th class="right">${yen(totals.wheelBack)}</th><th class="right">${yen(totals.champBack)}</th><th class="right">${yen(totals.jounaiBack)}</th><th class="right">${yen(totals.nomSet)}</th><th class="right">${yen(totals.nomSub)}</th><th class="right">${yen(totals.dohanBack)}</th><th class="right">${yen(totals.afterBack)}</th><th class="right">${yen(totals.back)}</th><th class="right">${yen(totals.pay)}</th></tr>`}
 function payrollWeekKey(base,castId){return `${castId}|${weekDates(base||state.businessDate).join('|')}`}
 function payrollLockRecord(c,base){state.payrollLocks=state.payrollLocks||{};return state.payrollLocks[payrollWeekKey(base,c.id)]||null}
@@ -3639,6 +3733,46 @@ async function runSafeMaintenance(){
     alert(`メンテナンス完了。\n整理前：${bytesLabel(before.total)}\n整理後：${bytesLabel(after.total)}\n削減：${bytesLabel(Math.max(0,before.total-after.total))}\n\n過去会計・給与・締め票・キャスト・同期設定は保持しています。`);
   }catch(e){console.error(e);alert('メンテナンス保存に失敗しました。容量不足が続く場合は、別の古いPOSデータがEdge内を圧迫している可能性があります。');}
 }
+
+function isMobileLike(){
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'') ||
+    (navigator.maxTouchPoints>1 && /Macintosh/i.test(navigator.userAgent||'')) ||
+    !!window.matchMedia?.('(max-width: 900px)').matches;
+}
+async function deliverGeneratedPng(blob,fileName){
+  if(!blob) throw new Error('画像データを作成できませんでした。');
+  if(isMobileLike() && typeof File==='function' && navigator.share && navigator.canShare){
+    try{
+      const file=new File([blob],fileName,{type:'image/png'});
+      if(navigator.canShare({files:[file]})){
+        await navigator.share({files:[file],title:fileName});
+        return 'share';
+      }
+    }catch(e){
+      if(e && e.name==='AbortError') return 'cancel';
+      console.warn('Web Share fallback:',e);
+    }
+  }
+  const url=URL.createObjectURL(blob);
+  try{
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=fileName;
+    a.rel='noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+    return 'download';
+  }catch(e){
+    console.warn('download fallback:',e);
+    const w=window.open(url,'_blank');
+    if(!w) throw e;
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    return 'open';
+  }
+}
+
 async function saveClosingA4(button){
   const source=document.getElementById('closingArea');
   if(!source || !source.querySelector('table')){
@@ -3706,7 +3840,7 @@ async function saveClosingA4(button){
     });
 
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
+    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:isMobileLike()?1.25:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
 
     const out=document.createElement('canvas');
     out.width=3508;
@@ -3723,14 +3857,7 @@ async function saveClosingA4(button){
     ctx.drawImage(raw,x,y,drawW,drawH);
 
     const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
-    const url=URL.createObjectURL(png);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=safeFileName((state.businessDate||'')+'_締め票_A4横')+'.png';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    await deliverGeneratedPng(png,safeFileName((state.businessDate||'')+'_締め票_A4横')+'.png');
   }catch(e){
     console.error(e);
     alert('締め票の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
@@ -3817,7 +3944,7 @@ async function saveWeeklyA4(button){
     });
 
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
+    const raw=await html2canvas(stage,{backgroundColor:'#ffffff',scale:isMobileLike()?1.25:2,useCORS:true,logging:false,windowWidth:stage.scrollWidth,windowHeight:stage.scrollHeight});
 
     const out=document.createElement('canvas');
     out.width=3508;
@@ -3834,14 +3961,7 @@ async function saveWeeklyA4(button){
     ctx.drawImage(raw,x,y,drawW,drawH);
 
     const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
-    const url=URL.createObjectURL(png);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=safeFileName(fileBase+'_A4横')+'.png';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    await deliverGeneratedPng(png,safeFileName(fileBase+'_A4横')+'.png');
   }catch(e){
     console.error(e);
     alert('週間表の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
@@ -3924,7 +4044,7 @@ async function saveSheetScreenshot(id,fileBase,button){
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
     const raw=await html2canvas(stage,{
       backgroundColor:'#ffffff',
-      scale:2,
+      scale:isMobileLike()?1.25:2,
       useCORS:true,
       logging:false,
       windowWidth:stage.scrollWidth,
@@ -3944,14 +4064,7 @@ async function saveSheetScreenshot(id,fileBase,button){
     ctx.drawImage(raw,Math.round((out.width-drawW)/2),Math.round((out.height-drawH)/2),drawW,drawH);
 
     const png=await new Promise((resolve,reject)=>out.toBlob(b=>b?resolve(b):reject(new Error('PNG作成に失敗しました。')),'image/png'));
-    const url=URL.createObjectURL(png);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=safeFileName(fileBase+(isMonthly?'_A4縦':'_A4横'))+'.png';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    await deliverGeneratedPng(png,safeFileName(fileBase+(isMonthly?'_A4縦':'_A4横'))+'.png');
   }catch(e){
     console.error(e);
     alert((isMonthly?'月間表':'週間表')+'の保存に失敗しました。\n'+(e&&e.message?e.message:'表を再表示してからもう一度実行してください。'));
@@ -4107,9 +4220,12 @@ function printElement(id){
   setTimeout(doPrint, 300);
 }
 
-function manualBackRates(){return{db:300,sb:600,jounai:JOUNAI_BACK,dohan:2000,after:1000};}
-function calcManualBacksFromQty(v){
-  const r=manualBackRates();
+function manualBackRates(c){
+  const bs=castBackSettings(c||{});
+  return{db:Number(bs.dbBack||0),sb:Number(bs.sbBack||0),jounai:Number(bs.jounaiBack||0),dohan:Number(bs.dohanBack||0),after:Number(bs.afterBack||0)};
+}
+function calcManualBacksFromQty(v,c){
+  const r=manualBackRates(c);
   return {
     dbBack:(Number(v.dbQty||0)||0)*r.db,
     sbBack:(Number(v.sbQty||0)||0)*r.sb,
@@ -4183,7 +4299,8 @@ function dayRevenueBreakdown(d){
 }
 function updateManualBackPreview(){
   const v={dbQty:numFrom('manualDbQty'),sbQty:numFrom('manualSbQty'),jounai:numFrom('manualJounai'),dohan:numFrom('manualDohan'),after:numFrom('manualAfter')};
-  const b=calcManualBacksFromQty(v);
+  const cid=document.getElementById('manualCloseCast')?.value,c=(state.casts||[]).find(x=>x.id===cid);
+  const b=calcManualBacksFromQty(v,c);
   const set=(id,val)=>{const el=document.getElementById(id); if(el) el.textContent=yen(val)};
   set('manualDbBackPreview',b.dbBack); set('manualSbBackPreview',b.sbBack); set('manualJounaiBackPreview',b.jounaiBack); set('manualDohanBackPreview',b.dohanBack); set('manualAfterBackPreview',b.afterBack);
 }
@@ -4198,7 +4315,14 @@ function saveManualDayCloseFromForm(d){
 
 let manualClosingEditId=null;
 let manualClosingHourlyTouched=false;
-function manualClosingRowsForDate(d){return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));}
+function manualClosingRowsForDate(d){
+  const latest={};
+  (state.manualClosingSheets||[]).filter(x=>x.businessDate===d).forEach(x=>{
+    const k=x.castId||x.castName||x.id,prev=latest[k];
+    if(!prev||new Date(x.updatedAt||x.createdAt||0)>=new Date(prev.updatedAt||prev.createdAt||0))latest[k]=x;
+  });
+  return Object.values(latest).sort((a,b)=>(a.castName||'').localeCompare(b.castName||''));
+}
 function manualClosingCastOptions(selected=''){
   return (state.casts||[]).filter(c=>!isCastHidden(c)).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${c.name}</option>`).join('')||'<option value="">表示中のキャストなし</option>';
 }
@@ -4291,14 +4415,12 @@ function resetManualCastForm(){
 }
 function cancelManualClosingEdit(){resetManualCastForm();}
 function manualPayrollForDate(d){
-  let labor=0,back=0,total=0;
-  manualClosingRowsForDate(d).forEach(r=>{
-    const p=manualRowPayroll(r);
-    labor+=Number(p.timePay||0);
-    back+=Number(p.back||0);
-    total+=Number(p.total||0);
+  let labor=0,back=0;
+  (state.casts||[]).forEach(c=>{
+    labor+=Number(timePay(c,d)||0);
+    back+=Number(stats(c.id,d).back||0);
   });
-  return {labor,back,total};
+  return {labor,back,total:labor+back};
 }
 function updateManualProfitPreview(){
   const box=document.getElementById('manualProfitPreview');if(!box)return;
@@ -4336,9 +4458,9 @@ function saveManualClosingSheet(){
   if(rawIn&&!inTime){alert('出勤時間の形式が違います');return;}
   if(rawOut&&!outTime){alert('退勤時間の形式が違います');return;}
   const qty={dbQty:numFrom('manualDbQty'),sbQty:numFrom('manualSbQty'),jounai:numFrom('manualJounai'),dohan:numFrom('manualDohan'),after:numFrom('manualAfter')};
-  const backs=calcManualBacksFromQty(qty);
+  const backs=calcManualBacksFromQty(qty,cast);
   state.manualClosingSheets=state.manualClosingSheets||[];
-  const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):null;
+  const existing=manualClosingEditId?(state.manualClosingSheets||[]).find(x=>x.id===manualClosingEditId):effectiveManualClosingRow(cast.id,d);
   const linkedBase=existing?.linkedBase||operationalCastSnapshot(cast,d);
   const rec={id:existing?.id||uuid(),businessDate:d,castId:cast.id,castName:cast.name,in:inTime,out:outTime,manualHourly:numFrom('manualHourly')||manualAutoHourlyFromForm(cast),linkedBase,
     dbQty:qty.dbQty,dbBack:backs.dbBack,sbQty:qty.sbQty,sbBack:backs.sbBack,
@@ -4574,6 +4696,178 @@ setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);appl
 console.assert(typeof openClosingSheetInput==='function','締め票入力画面が存在する');
 console.assert(typeof saveManualClosingSheet==='function','締め票入力保存関数が存在する');
 console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→締め票入力連携が存在する');
+
+
+/* ===== 途中合流・人数訂正モデル v1 ===== */
+(function(){
+  const STORE_NAME = 'amami';
+  const JOIN_MAX_HOUR = 26;
+  const JOIN_MAX_MINUTES = 1530;
+  const IS_AMAMI = true;
+  const joinDefaultUnit = (dt,t)=>{ return amamiSetRateAt(dt,state.businessDate)||extensionRateAt(dt,state.businessDate)||baseSeatUnit(t); };
+  const originalNormalizeHalfTable = IS_AMAMI ? normalizeHalfExtensionPricesInTable : null;
+  const joinItems=t=>(Array.isArray(t&&t.items)?t.items:[]).filter(i=>i&&i.type==='guestJoin');
+  const joinCount=t=>joinItems(t).reduce((a,i)=>a+(Number(i.guestCount)||0)*(Number(i.qty)||1),0);
+  const joinCharge=t=>joinItems(t).reduce((a,i)=>a+(Number(i.price)||0)*(Number(i.qty)||1),0);
+  function ensureModel(t){
+    if(!t)return t;
+    t.items=Array.isArray(t.items)?t.items:[];
+    const joined=joinCount(t), current=Math.max(1,Number(t.guests)||1);
+    if(!Number.isFinite(Number(t.baseGuests))) t.baseGuests=Math.max(1,current-joined);
+    const expected=Math.max(1,(Number(t.baseGuests)||1)+joined);
+    if(current!==expected){ t.baseGuests=Math.max(1,current-joined); }
+    t.guests=Math.max(1,(Number(t.baseGuests)||1)+joined);
+    return t;
+  }
+  function guestCountAt(t,dt){
+    ensureModel(t);
+    const ts=new Date(dt||new Date()).getTime();
+    let n=Math.max(1,Number(t.baseGuests)||1);
+    joinItems(t).forEach(i=>{const jt=new Date(i.joinedAt||i.createdAt||0).getTime();if(Number.isFinite(jt)&&jt<=ts)n+=(Number(i.guestCount)||0)*(Number(i.qty)||1);});
+    return Math.max(1,n);
+  }
+  function refreshExtensions(t){
+    if(!t)return false; ensureModel(t); let changed=false;
+    (t.items||[]).forEach(i=>{
+      if(!i||i.type!=='extension')return;
+      const dt=new Date(extensionItemStart(i)), kind=extensionItemKind(i), cnt=guestCountAt(t,dt);
+      const autoUnit=extensionPrice(kind,dt,1);
+      const manual=(i.manualExtensionUnitPrice!==undefined&&i.manualExtensionUnitPrice!==null&&i.manualExtensionUnitPrice!=='')?Math.max(0,Number(i.manualExtensionUnitPrice)||0):null;
+      const unit=(i.manualExtensionPrice&&manual!==null)?manual:autoUnit;
+      const next=unit*cnt;
+      if(Number(i.price)!==next){i.price=next;changed=true;}
+      i.chargedGuests=cnt;
+    });
+    return changed;
+  }
+  function normalizeAll(){
+    (state.tables||[]).forEach(t=>{ensureModel(t);refreshExtensions(t)});
+  }
+
+  const oldBaseSeatUnit=baseSeatUnit;
+  baseSeatUnit=function(t){
+    ensureModel(t);
+    if(!t.startedAt)return 0;
+    if(t.baseSeatUnitOverride!==undefined&&t.baseSeatUnitOverride!==null&&t.baseSeatUnitOverride!=='')return Number(t.baseSeatUnitOverride)||0;
+    if(t.baseSeatOverride!==undefined&&t.baseSeatOverride!==null&&t.baseSeatOverride!=='')return Math.round((Number(t.baseSeatOverride)||0)/Math.max(1,Number(t.baseGuests)||1));
+    return oldBaseSeatUnit(t);
+  };
+  baseSeat=function(t){ensureModel(t);return baseSeatUnit(t)*Math.max(1,Number(t.baseGuests)||1)};
+  extensionTotal=function(t){refreshExtensions(t);return (t.items||[]).filter(i=>i.type==='extension').reduce((a,i)=>a+(Number(i.price)||0)*(Number(i.qty)||1),0)};
+  seat=function(t,end=new Date()){return baseSeat(t)+extensionTotal(t)};
+
+  if(IS_AMAMI){
+    normalizeHalfExtensionPricesInTable=function(t){return refreshExtensions(t)};
+    normalizeAllHalfExtensionPrices=function(){normalizeAll();(state.sales||[]).forEach(s=>{const t=s&&s.table;if(!t)return;if(joinItems(t).length||Number.isFinite(Number(t.baseGuests)))refreshExtensions(t);else if(originalNormalizeHalfTable)originalNormalizeHalfTable(t);});return true};
+  }
+
+  const oldCalc=calc;
+  calc=function(t,end=new Date()){
+    ensureModel(t);refreshExtensions(t);
+    const o=oldCalc(t,end), add=joinCharge(t), oldSub=Number(o.subtotal)||0;
+    if(!add){o.guestJoin=0;return o;}
+    const taxRate=oldSub?Number(o.tax||0)/oldSub:0.1;
+    const serviceRate=oldSub?Number(o.service||0)/oldSub:0;
+    const cardRate=oldSub?Number(o.card||0)/oldSub:(t.payment==='card'?0.1:0);
+    o.guestJoin=add;o.subtotal=oldSub+add;o.tax=Math.round(o.subtotal*taxRate);o.service=Math.round(o.subtotal*serviceRate);o.card=t.payment==='card'?Math.round(o.subtotal*cardRate):0;o.total=o.subtotal+o.tax+o.service+o.card;
+    return o;
+  };
+
+  const oldUpdateTable=updateTable;
+  updateTable=function(id,p){
+    if(typeof isViewer!=='undefined'&&isViewer)return;
+    if(p&&Object.prototype.hasOwnProperty.call(p,'guests')){
+      const t=(state.tables||[]).find(x=>x.id===id);if(!t)return;
+      ensureModel(t);const desired=Math.max(1,Number(p.guests)||1), joined=joinCount(t);
+      t.baseGuests=Math.max(1,desired-joined);t.guests=t.baseGuests+joined;
+      Object.keys(p).forEach(k=>{if(k!=='guests')t[k]=p[k]});
+      if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);
+      refreshExtensions(t);render();return;
+    }
+    return oldUpdateTable(id,p);
+  };
+
+  const oldDeleteOrderItem=deleteOrderItem;
+  deleteOrderItem=function(tableId,itemId){
+    const t=(state.tables||[]).find(x=>x.id===tableId), item=t?(t.items||[]).find(x=>x.id===itemId):null;
+    if(!item||item.type!=='guestJoin')return oldDeleteOrderItem(tableId,itemId);
+    if(!confirm('この途中合流を削除しますか？'))return;
+    ensureModel(t);t.items=(t.items||[]).filter(x=>x.id!==itemId);t.guests=Math.max(1,(Number(t.baseGuests)||1)+joinCount(t));
+    if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);
+    refreshExtensions(t);render();
+  };
+
+  updateExtensionAddPreview=function(){
+    const tableId=extensionAddTableId.value,kind=extensionAddKind.value,t=(state.tables||[]).find(x=>x.id===tableId);if(!t)return;
+    let editTime=normalizeTimeValue(extensionAddTime.value,'exact',JOIN_MAX_HOUR);if(extensionAddTime.value)setTimeInput('extensionAddTime',editTime,JOIN_MAX_HOUR);
+    const dt=(extensionAddDate.value&&editTime)?parseBusinessDT(extensionAddDate.value,editTime):extensionStartAt(t), min=kind==='half'?HALF_EXTEND_MIN:FULL_EXTEND_MIN;
+    const guests=guestCountAt(t,dt),autoUnit=extensionPrice(kind,dt,1),unitEl=document.getElementById('extensionAddUnitPrice');
+    if(unitEl&&!unitEl.dataset.manual)unitEl.value=autoUnit;const unitPrice=unitEl?Math.max(0,Number(unitEl.value)||0):autoUnit;
+    extensionAddKindLabel.textContent=kind==='half'?'ハーフ延長':'フル延長';extensionAddMinutes.textContent=min+'分';extensionAddRateLabel.textContent=extensionRateLabelAt(dt);extensionAddGuests.textContent=guests+'名';extensionAddPrice.textContent=yen(autoUnit*guests);if(document.getElementById('extensionAddFinalPrice'))extensionAddFinalPrice.textContent=yen(unitPrice*guests);
+  };
+  updateExtensionEditPreview=function(){
+    const tableId=extensionEditTableId.value,itemId=extensionEditItemId.value,t=(state.tables||[]).find(x=>x.id===tableId),item=t?(t.items||[]).find(x=>x.id===itemId):null;if(!t||!item)return;
+    let editTime=normalizeTimeValue(extensionEditTime.value,'exact',JOIN_MAX_HOUR);if(extensionEditTime.value)setTimeInput('extensionEditTime',editTime,JOIN_MAX_HOUR);
+    const dt=(extensionEditDate.value&&editTime)?parseBusinessDT(extensionEditDate.value,editTime):new Date(),kind=extensionItemKind(item),min=kind==='half'?HALF_EXTEND_MIN:FULL_EXTEND_MIN,autoUnit=extensionPrice(kind,dt,1),guests=guestCountAt(t,dt);
+    const manualEl=document.getElementById('extensionEditManualPrice'),manualVal=manualEl?String(manualEl.value||'').trim():'',finalUnit=manualVal===''?autoUnit:Math.max(0,Number(manualVal)||0);
+    extensionEditKind.textContent=kind==='half'?'ハーフ延長':'フル延長';extensionEditMinutes.textContent=min+'分';extensionEditRateLabel.textContent=extensionRateLabelAt(dt);extensionEditGuests.textContent=guests+'名';extensionEditPrice.textContent=yen(autoUnit);if(document.getElementById('extensionEditFinalPrice'))extensionEditFinalPrice.textContent=yen(finalUnit*guests);
+  };
+  confirmExtensionEdit=function(){
+    const tableId=extensionEditTableId.value,itemId=extensionEditItemId.value,t=(state.tables||[]).find(x=>x.id===tableId),item=t?(t.items||[]).find(x=>x.id===itemId):null;if(!t||!item)return;
+    if(!extensionEditDate.value||!extensionEditTime.value){alert('延長開始日と時間を入力してください');return;}
+    const editTime=normalizeTimeValue(extensionEditTime.value,'exact',JOIN_MAX_HOUR),dt=parseBusinessDT(extensionEditDate.value,editTime),kind=extensionItemKind(item),autoUnit=extensionPrice(kind,dt,1),guests=guestCountAt(t,dt),manualEl=document.getElementById('extensionEditManualPrice'),manualVal=manualEl?String(manualEl.value||'').trim():'',unit=manualVal===''?autoUnit:Math.max(0,Number(manualVal)||0);
+    item.kind=kind;item.extensionStartAt=dt.toISOString();item.extensionChargeAt=dt.toISOString();item.price=unit*guests;item.manualExtensionPrice=manualVal!=='';item.manualExtensionUnitPrice=manualVal===''?'':unit;item.chargedGuests=guests;closeModal('extensionEditModal');render();
+  };
+
+  function ensureModal(){
+    if(document.getElementById('guestJoinModal'))return;
+    const el=document.createElement('div');el.id='guestJoinModal';el.className='modal';
+    el.innerHTML=`<div class="box" style="max-width:560px"><div class="row"><h2 id="guestJoinTitle">途中合流</h2><button class="btn out small" onclick="closeModal('guestJoinModal')">閉じる</button></div><p class="muted">あとから来たお客様だけを追加します。過去のセット料金は変えず、この合流料金と以降の延長人数に反映します。</p><input id="guestJoinTableId" type="hidden"><div class="grid3"><div><label>合流日</label><input id="guestJoinDate" type="date" oninput="updateGuestJoinPreview()"></div><div><label>合流時間</label><input id="guestJoinTime" type="hidden"><div id="guestJoinTimePicker"></div></div><div><label>合流人数</label><input id="guestJoinGuests" type="number" min="1" value="1" oninput="updateGuestJoinPreview()"></div></div><div class="grid2" style="margin-top:10px"><div><label>1人あたりセット料金</label><input id="guestJoinUnitPrice" type="number" min="0" step="100" oninput="this.dataset.manual='1';updateGuestJoinPreview()"></div><div class="info"><b>追加料金</b><span id="guestJoinTotal">-</span></div></div><div class="info" style="margin-top:10px"><b>合流後人数</b><span id="guestJoinAfterGuests">-</span></div><button class="btn ok" style="width:100%;margin-top:12px" onclick="confirmGuestJoin()">途中合流を追加</button></div>`;
+    document.body.appendChild(el);initTimePicker('guestJoinTime','guestJoinTimePicker','updateGuestJoinPreview',JOIN_MAX_HOUR);
+  }
+  window.openGuestJoin=function(id){
+    if(typeof isViewer!=='undefined'&&isViewer)return;ensureModal();const t=(state.tables||[]).find(x=>x.id===id);if(!t||t.status!=='busy')return;ensureModel(t);
+    guestJoinTableId.value=id;guestJoinTitle.textContent=id+' 途中合流';guestJoinDate.value=businessDateForClock(now,state.businessDate);guestJoinGuests.value=1;guestJoinUnitPrice.dataset.manual='';guestJoinUnitPrice.value='';setTimeInput('guestJoinTime',businessTime10(now,state.businessDate,'ceil',JOIN_MAX_HOUR),JOIN_MAX_HOUR);updateGuestJoinPreview();openModal('guestJoinModal');
+  };
+  window.updateGuestJoinPreview=function(){
+    const t=(state.tables||[]).find(x=>x.id===guestJoinTableId.value);if(!t)return;let tv=normalizeTimeValue(guestJoinTime.value,'exact',JOIN_MAX_HOUR);if(guestJoinTime.value)setTimeInput('guestJoinTime',tv,JOIN_MAX_HOUR);if(!guestJoinDate.value||!tv)return;
+    const dt=parseBusinessDT(guestJoinDate.value,tv),auto=Math.max(0,Number(joinDefaultUnit(dt,t))||0);if(!guestJoinUnitPrice.dataset.manual)guestJoinUnitPrice.value=auto;const n=Math.max(1,Number(guestJoinGuests.value)||1),unit=Math.max(0,Number(guestJoinUnitPrice.value)||0);guestJoinTotal.textContent=yen(n*unit);guestJoinAfterGuests.textContent=(Math.max(1,Number(t.guests)||1)+n)+'名';
+  };
+  window.confirmGuestJoin=function(){
+    const t=(state.tables||[]).find(x=>x.id===guestJoinTableId.value);if(!t)return;if(!guestJoinDate.value||!guestJoinTime.value)return alert('合流日時を入力してください');
+    const tv=normalizeTimeValue(guestJoinTime.value,'exact',JOIN_MAX_HOUR),parts=tv.split(':').map(Number),minsClock=(parts[0]||0)*60+(parts[1]||0);if(!tv||minsClock>JOIN_MAX_MINUTES)return alert('合流時間を確認してください');
+    const n=Math.max(1,Number(guestJoinGuests.value)||1),unit=Math.max(0,Number(guestJoinUnitPrice.value)||0),dt=parseBusinessDT(guestJoinDate.value,tv);ensureModel(t);
+    const item={id:uuid(),type:'guestJoin',name:`途中合流 ${n}名（1人 ${unit.toLocaleString('ja-JP')}円）`,price:n*unit,qty:1,guestCount:n,unitPrice:unit,joinedAt:dt.toISOString(),createdAt:new Date().toISOString()};
+    t.items.push(item);t.guests=(Number(t.guests)||1)+n;if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);refreshExtensions(t);closeModal('guestJoinModal');render();
+  };
+
+  const oldRenderTables=renderTables;
+  renderTables=function(){
+    oldRenderTables();const t=(state.tables||[]).find(x=>x.id===active)||(state.tables||[])[0],panel=document.getElementById('tablePanel');if(!t||!panel||t.status!=='busy')return;
+    if(!panel.querySelector('.guest-join-action')){const wrap=document.createElement('div');wrap.className='guest-join-action';wrap.style.marginTop='10px';wrap.innerHTML=`<button class="btn ok" style="width:100%;padding:13px" onclick="openGuestJoin('${t.id}')">途中合流</button><div class="muted" style="font-size:11px;margin-top:4px">あとから来たお客様はこちら。過去セットは変更しません。</div>`;const timeBtn=[...panel.querySelectorAll('button')].find(b=>b.textContent.trim()==='時間を修正');if(timeBtn)timeBtn.insertAdjacentElement('afterend',wrap);else panel.prepend(wrap);}
+    const labels=[...panel.querySelectorAll('label')];const lab=labels.find(x=>x.textContent.trim()==='人数');if(lab){lab.textContent='現在人数（訂正）';const box=lab.parentElement;if(box&&!box.querySelector('.guest-correct-note')){const note=document.createElement('div');note.className='muted guest-correct-note';note.style.fontSize='11px';note.style.marginTop='4px';note.textContent='入力ミスの訂正用。途中参加は「途中合流」';box.appendChild(note);}}
+  };
+
+  const oldDetails=details;
+  if(IS_AMAMI){details=function(t,c){ensureModel(t);let html=oldDetails(t,c);return html.replace(/セット料金 ×\d+名/,`セット料金 ×${Math.max(1,Number(t.baseGuests)||1)}名`);};}
+
+  receiptRows=function(t,c){
+    ensureModel(t);refreshExtensions(t);let rows=[];const baseN=Math.max(1,Number(t.baseGuests)||1),setUnit=baseSeatUnit(t);if(setUnit>0)rows.push(receiptLine('セット料金',setUnit,baseN,setUnit*baseN));
+    (t.items||[]).filter(i=>i.type==='extension').forEach(i=>{const q=Number(i.qty||1)||1,dt=new Date(extensionItemStart(i)),cnt=guestCountAt(t,dt),total=Number(i.price||0)*q,unit=cnt?Math.round(Number(i.price||0)/cnt):Number(i.price||0),name=extensionItemKind(i)==='half'?'ハーフ延長':'延長料金';rows.push(receiptLine(name,unit,cnt*q,total));});
+    joinItems(t).forEach(i=>{const q=Number(i.qty||1)||1,n=(Number(i.guestCount)||0)*q;rows.push(receiptLine('途中合流',Number(i.unitPrice)||0,n,(Number(i.price)||0)*q));});
+    if(c.single>0)rows.push(receiptLine('シングルチャージ',2000,c.extensionRepeats||1,c.single));const nominationUnit=Number(t.nominationUnitPrice??2000)||0,rep=Number(c.extensionRepeats||1)||1;
+    if((t.nominations||[]).length&&nominationUnit>0)rows.push(receiptLine('本指名',nominationUnit,(t.nominations||[]).length*rep,c.nomination));{let jq=jounaiChargeCount(t);if(jq)rows.push(receiptLine('場内指名',1000,jq,c.jounai));}if((t.dohan||[]).length)rows.push(receiptLine('同伴',3000,(t.dohan||[]).length,c.dohan));if((t.after||[]).length)rows.push(receiptLine('アフター',3000,(t.after||[]).length,c.after));
+    groupedReceiptItems(t,'drink',i=>`${cname(i.castId)}D`).forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));groupedReceiptItems(t,'castShot',i=>`${cname(i.castId)}S`).forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));groupedReceiptItems(t,'beer',i=>'ビール').forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));groupedReceiptItems(t,'guestShot',i=>i.name||'ショット').forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));groupedReceiptItems(t,'wheel',i=>i.name||'テキカン').forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));groupedReceiptItems(t,'champagne',i=>i.name||'シャンパン').forEach(x=>rows.push(receiptLine(x.label,x.unit,x.qty,x.total)));
+    rows.push(`<tr class="gap"><td colspan="3"></td></tr>`);rows.push(`<tr><th>小計</th><td></td><th class="right">${yen(c.subtotal)}</th></tr>`);rows.push(`<tr><th>TAX</th><td></td><th class="right">${yen(c.tax)}</th></tr>`);rows.push(`<tr><th>サービス</th><td></td><th class="right">${yen(c.service)}</th></tr>`);const baseDue=Math.round((+c.subtotal||0)+(+c.tax||0)+(+c.service||0));rows.push(`<tr class="total"><th>合計</th><td></td><th class="right">${yen(baseDue)}</th></tr>`);const prepays=tablePrepayments(t);prepays.forEach(p=>rows.push(`<tr><td>一部入金 ${p.method==='card'?'カード':'現金'}${p.memo?' / '+esc(p.memo):''}</td><td class="calc"></td><td class="right">-${yen(p.amount)}</td></tr>`));if(prepays.length)rows.push(`<tr class="paytotal"><th>残額</th><td></td><th class="right">${yen(Math.max(0,baseDue-prepayBaseTotal(t)))}</th></tr>`);if(c.card>0)rows.push(`<tr class="cardfee"><td>カード加算</td><td></td><td class="right">${yen(c.card)}</td></tr><tr class="paytotal"><th>カード請求額</th><td></td><th class="right">${yen(c.total)}</th></tr>`);return rows.join('');
+  };
+
+  const oldRender=render;
+  render=function(){normalizeAll();return oldRender();};
+  window.__guestJoinDebug={ensureModel,guestCountAt,joinCount,joinCharge,refreshExtensions,store:STORE_NAME};
+  normalizeAll();ensureModal();render();
+})();
+/* ===== 途中合流・人数訂正モデル v1 ここまで ===== */
+
 </script>
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
