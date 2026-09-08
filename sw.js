@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v6-anejo-extension-analytics';
+const CACHE_NAME = 'blow-amami-pos-mobile-v7-receipt-edit-fix';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',

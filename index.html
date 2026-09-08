@@ -2785,7 +2785,7 @@ function pastReceiptCastOptions(selected=''){
 }
 function editPastReceipt(saleId){
   if(isViewer)return;
-  if(!receiptEditUnlocked){requireReceiptEditAccess(()=>editPastReceipt(saleId));return;}
+  if(!receiptGrantActive()){requireReceiptEditAccess(()=>editPastReceipt(saleId));return;}
   let sale=state.sales.find(s=>s.id===saleId);
   if(!sale||!sale.table)return alert('伝票が見つかりません');
   recalcPastSale(sale);
@@ -4618,7 +4618,7 @@ function deleteManualClosingSheet(id){
 
 function openReceiptEditPanel(){
   if(isViewer)return;
-  if(!receiptEditUnlocked){requireReceiptEditAccess(openReceiptEditPanel);return;}
+  if(!receiptGrantActive()){requireReceiptEditAccess(openReceiptEditPanel);return;}
   selectTitle.textContent='過去伝票修正';
   const rows=(state.sales||[]).slice().sort((a,b)=>new Date(b.checkoutAt)-new Date(a.checkoutAt)).map(s=>`<tr><td>${s.businessDate}</td><td>${time(new Date(s.checkoutAt))}</td><td>${s.table?.id||'-'}</td><td>${s.table?.guests||'-'}</td><td>${s.table?.payment==='card'?'カード':s.table?.payment==='unpaid'?'未収':'現金'}</td><td class="right">${yen(s.total)}</td><td><button class="btn blue small" onclick="editPastReceipt('${s.id}')">修正</button></td></tr>`).join('')||'<tr><td colspan="7" class="muted">修正できる伝票がありません</td></tr>';
   selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><p class="muted">過去の会計伝票を選んで、ドリンク・ショット・場内・指名などを増減できます。修正後は売上・週間表・利益率まで再計算されます。</p><div class="scroll"><table><thead><tr><th>営業日</th><th>時刻</th><th>卓</th><th>人数</th><th>支払</th><th class="right">合計</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
