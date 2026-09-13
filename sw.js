@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v17-payroll-unified';
+const CACHE_NAME = 'blow-amami-pos-mobile-v17-payroll-display65';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
