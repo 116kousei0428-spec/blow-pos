@@ -1066,6 +1066,7 @@ async function pollCloudChanges(){
     state=incoming;
     const recoveryBaselineChanged=applyAttendanceRecoveryBaseline();
     const attendanceLinkChanged=repairAttendanceLinks();
+    rebuildDerivedPayrollSummaries();
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
     const liveJounaiFixed=repairExistingLiveJounaiPhases();
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
@@ -1243,6 +1244,7 @@ async function cloudLoad(){
     applyingRemoteState=true;
     state=normalizeRestoreDataForLocalStorage(nextState);
     repairAttendanceLinks();
+    rebuildDerivedPayrollSummaries();
     repairActiveTableTimes();
     repairAllExtensionDurations();
     repairExistingLiveJounaiPhases();
@@ -2950,6 +2952,31 @@ function syncDerivedAfterReceiptEdit(d){
     close.editedAt=new Date().toISOString();
   });
 }
+function rebuildDerivedPayrollSummaries(){
+  // 手修正後に古い保存済み人件費が別画面へ残らないよう、既存の営業終了保存/レジ締めを正規日次集計へ再接続する。
+  const dates=new Set();
+  (state.businessSheets||[]).forEach(x=>x?.businessDate&&dates.add(x.businessDate));
+  (state.closings||[]).forEach(x=>x?.businessDate&&dates.add(x.businessDate));
+  (state.manualClosingSheets||[]).forEach(x=>x?.businessDate&&dates.add(x.businessDate));
+  (state.manualClosingDaySheets||[]).forEach(x=>x?.businessDate&&dates.add(x.businessDate));
+  (state.casts||[]).forEach(c=>Object.keys(c.logs||{}).forEach(d=>dates.add(d)));
+  dates.forEach(d=>{
+    const s=daySum(d);
+    const castProfitRows=(state.casts||[]).map(c=>castProfitRow(c,d));
+    const shopRate=s.sales?s.profit/s.sales*100:0;
+    (state.businessSheets||[]).filter(x=>x.businessDate===d).forEach(sheet=>{
+      sheet.summary={...s};
+      sheet.profitSummary={...s,shopRate};
+      sheet.castProfits=deepCopy(castProfitRows.map(r=>({castId:r.cast.id,castName:r.cast.name,sales:r.sales,labor:r.labor,back:r.back,cost:r.cost,profit:r.profit,rate:r.rate})));
+      sheet.attendance=deepCopy((state.casts||[]).map(c=>({castId:c.id,castName:c.name,log:effectiveWorkLog(c,d)||{}})).filter(x=>attendanceLogHasValue(x.log)));
+    });
+    (state.closings||[]).filter(x=>x.businessDate===d).forEach(close=>{
+      close.sales=s.sales;close.labor=s.labor;close.back=s.back;close.payroll=s.payroll;close.expenses=s.expenses;close.profit=s.profit;
+    });
+  });
+  return dates.size;
+}
+
 function currentDeviceName(){return (getCloudConfig()?.device||localStorage.getItem('blow_device_name')||'この端末').trim()||'この端末'}
 function receiptGrantActive(){
   if(isAdmin)return true;
@@ -3411,6 +3438,7 @@ function restoreBackup(ev){
         pruneBackupHistory(3);
         state=normalizeRestoreDataForLocalStorage(data);
         repairAttendanceLinks();
+        rebuildDerivedPayrollSummaries();
         repairActiveTableTimes();
         repairAllExtensionDurations();
         active='A1';
@@ -3547,16 +3575,9 @@ function manageSessionStats(cid,d){
   }
 }
 function manageSessionDaySum(d=state.businessDate){
-  const sales=manageSessionSales(d).reduce((a,s)=>a+saleBaseAmount(s),0);
-  let labor=0,back=0;
-  (state.casts||[]).forEach(c=>{
-    const l=(c.logs||{})[d]||{};
-    const sameSession=(!currentManageStart()) || l._sessionStartAt===(state.businessStartedAt||'') || afterCurrentManageStart(l._updatedAt);
-    if(sameSession) labor+=timePay(c,d);
-    back+=manageSessionStats(c.id,d).back;
-  });
-  const exp=(state.expenses||[]).filter(e=>e.businessDate===d&&afterCurrentManageStart(e.createdAt||e.updatedAt)).reduce((a,e)=>a+(Number(e.amount)||0),0);
-  return{sales,labor,back,payroll:labor+back,expenses:exp,profit:sales-labor-back-exp};
+  // 管理トップも締め票・履歴・月締めと同じ日次集計を唯一の正として使う。
+  // セッション開始時刻ベースの別計算を残すと、締め票で修正した退勤時刻が管理トップだけズレるため禁止。
+  return daySum(d);
 }
 
 function pct(n){return isFinite(n)?(Math.round(n*10)/10).toFixed(1)+'%':'0.0%'}
@@ -3597,15 +3618,12 @@ function latestBusinessSheet(d){
   return (state.businessSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>new Date(b.savedAt||0)-new Date(a.savedAt||0))[0]||null;
 }
 function profitDataForDate(d){
-  let live=daySum(d);
-  let sheet=latestBusinessSheet(d);
-  let summary=sheet?.profitSummary||sheet?.summary||live;
-  let shopRate=summary.sales?summary.profit/summary.sales*100:0;
-  let castRows=(sheet?.castProfits||[]).map(r=>({cast:{id:r.castId,name:r.castName},sales:r.sales||0,labor:r.labor||0,back:r.back||0,cost:r.cost||0,profit:r.profit||0,rate:r.rate||0}));
-  if(!castRows.length){
-    castRows=state.casts.map(cast=>castProfitRow(cast,d));
-  }
-  castRows=castRows.sort((a,b)=>b.profit-a.profit);
+  // 保存時スナップショットの古い人件費を画面へ出さない。
+  // 締め票入力・出退勤修正後の現在の正規計算を、利益率画面でも必ずそのまま表示する。
+  const summary=daySum(d);
+  const sheet=latestBusinessSheet(d);
+  const shopRate=summary.sales?summary.profit/summary.sales*100:0;
+  const castRows=(state.casts||[]).map(cast=>castProfitRow(cast,d)).sort((a,b)=>b.profit-a.profit);
   return {summary:{...summary,shopRate},castRows,sheet};
 }
 function renderProfitRates(){
@@ -3861,7 +3879,7 @@ function renderExtensionAnalytics(){
     cardStatText('平均延長回数',`${extensionAnalyticsNumber(avgExtensionEvents)}回`);
 }
 
-function renderManage(){let s=manageSessionDaySum(state.businessDate);manageSummary.innerHTML=cardStat('売上',s.sales)+cardStat('人件費',s.labor)+cardStat('バック',s.back)+cardStat('給与合計',s.payroll)+cardStat('仕入れ支出',s.expenses)+cardStat('純利益',s.profit);renderExtensionAnalytics();expenseRows.innerHTML=state.expenses.filter(e=>e.businessDate===state.businessDate).map(e=>`<tr><td>${e.name}</td><td class="right">${yen(e.amount)}</td><td>${isAdmin?`<button class="btn bad small" onclick="delExpense('${e.id}')">削除</button>`:'-'}</td></tr>`).join('');weekCast.innerHTML=state.casts.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');if(!weekDate.value)weekDate.value=state.businessDate;
+function renderManage(){let s=daySum(state.businessDate);manageSummary.innerHTML=cardStat('売上',s.sales)+cardStat('人件費',s.labor)+cardStat('バック',s.back)+cardStat('給与合計',s.payroll)+cardStat('仕入れ支出',s.expenses)+cardStat('純利益',s.profit);renderExtensionAnalytics();expenseRows.innerHTML=state.expenses.filter(e=>e.businessDate===state.businessDate).map(e=>`<tr><td>${e.name}</td><td class="right">${yen(e.amount)}</td><td>${isAdmin?`<button class="btn bad small" onclick="delExpense('${e.id}')">削除</button>`:'-'}</td></tr>`).join('');weekCast.innerHTML=state.casts.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');if(!weekDate.value)weekDate.value=state.businessDate;
   const backupHtml=`<div class="card" style="margin-top:12px"><h3>自動バックアップ履歴</h3><p class="muted">営業終了時に自動作成されます。</p><div class="scroll"><table><thead><tr><th>営業日</th><th>作成時刻</th><th>理由</th><th>表示</th></tr></thead><tbody>${renderBackupList()}</tbody></table></div></div>`;
   if(!document.getElementById('backupAutoPanel')){let div=document.createElement('div');div.id='backupAutoPanel';closingArea.before(div)}
   document.getElementById('backupAutoPanel').innerHTML=backupHtml;
@@ -4908,7 +4926,10 @@ function saveManualAttendanceEdit(castId,d){
   writeCastAttendanceLog(c,d,{in:inTime,out:outTime,absent:false,status:''},{manualClosingId:mr?.id,updatedAt});
   invalidatePayrollLockForCastDate(c,d);
   if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);
-  save();updateManualProfitPreview();renderManualAttendanceList(d);
+  save();
+  // 管理トップ・履歴・利益率・週間一覧まで同じ計算結果で即時再描画する。
+  render();
+  updateManualProfitPreview();renderManualAttendanceList(d);
   const selected=document.getElementById('manualCloseCast');if(selected&&selected.value===castId&&!manualClosingEditId)loadOperationalCastIntoForm();
 }
 function deleteManualAttendanceEdit(castId,d){
@@ -4919,7 +4940,9 @@ function deleteManualAttendanceEdit(castId,d){
   writeCastAttendanceLog(c,d,{in:'',out:'',absent:false,status:'',_attendanceCleared:true},{updatedAt});
   invalidatePayrollLockForCastDate(c,d);
   if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);
-  save();updateManualProfitPreview();renderManualAttendanceList(d);
+  save();
+  render();
+  updateManualProfitPreview();renderManualAttendanceList(d);
   const selected=document.getElementById('manualCloseCast');if(selected&&selected.value===castId&&!manualClosingEditId){resetManualCastForm();loadOperationalCastIntoForm();}
 }
 function editManualClosingSheet(id){
@@ -5188,6 +5211,7 @@ function runPosSelfTests(){
   console.assert(document.documentElement.innerHTML.includes('一人分セット料金'),'卓画面に一人分セット料金入力欄が存在する');
   console.assert(typeof castTimePickerHtml==='function','キャスト出退勤の表示も10分刻みセレクト式');
   console.assert(typeof operationalWorkLog==='function'&&typeof repairAttendanceLinks==='function','出勤情報の営業・締め票連携関数が存在する');
+  console.assert(manageSessionDaySum===manageSessionDaySum && typeof rebuildDerivedPayrollSummaries==='function','管理表示と保存済み集計の再同期関数が存在する');
   console.assert(typeof applyAttendanceRecoveryBaseline==='function','バックアップ実データの欠損補完処理が存在する');
   console.assert(attendanceLogHasValue({in:'00:00',out:'00:00'})===false&&attendanceLogHasValue({in:'00:00',out:'01:00'})===true,'00:00初期値と実勤務を正しく区別する');
   console.assert(chooseAttendanceLog([{log:{absent:true,in:'',out:'',_updatedAt:'2099-01-02T03:00:00Z'},ts:4070996400000,rank:2},{log:{absent:false,in:'20:00',out:'24:00',_updatedAt:'2099-01-02T02:00:00Z'},ts:4070992800000,rank:1}],{}).in==='20:00','自動休みより実出退勤を優先する');
@@ -5196,7 +5220,7 @@ function runPosSelfTests(){
 }
 runPosSelfTests();
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
-setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();const recoveryBaselineChangedOnBoot=applyAttendanceRecoveryBaseline();const attendanceLinkChangedOnBoot=repairAttendanceLinks();if(recoveryBaselineChangedOnBoot||attendanceLinkChangedOnBoot){try{save()}catch(e){console.warn('過去データ復旧の保存に失敗',e)}}render();setTimeout(startAutoSync,800);
+setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();const recoveryBaselineChangedOnBoot=applyAttendanceRecoveryBaseline();const attendanceLinkChangedOnBoot=repairAttendanceLinks();rebuildDerivedPayrollSummaries();if(recoveryBaselineChangedOnBoot||attendanceLinkChangedOnBoot){try{save()}catch(e){console.warn('過去データ復旧の保存に失敗',e)}}render();setTimeout(startAutoSync,800);
 
 
 console.assert(typeof openClosingSheetInput==='function','締め票入力画面が存在する');
