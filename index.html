@@ -1941,6 +1941,11 @@ function payrollCastList(){
   // 金額計算は必ずID一意化済みリストだけを使う。重複IDの二重人件費を禁止する。
   return dedupeCastRegistryById(state.casts||[]);
 }
+function payrollCastById(id){
+  const key=String(id||'');
+  return payrollCastList().find(c=>String(c.id||'')===key)||null;
+}
+
 function uniqueCastInListByName(list,name){
   const exact=normalizedCastName(name);if(!exact)return null;
   const exactHits=(list||[]).filter(c=>normalizedCastName(c&&c.name)===exact);
@@ -3555,21 +3560,33 @@ function effectiveManualClosingRow(castId,d){
   const c=(state.casts||[]).find(x=>x.id===castId);
   return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&(x.castId===castId||(c&&historicalCastMatches(x,c)))).sort((a,b)=>new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0))[0]||null;
 }
-function effectiveWorkLog(c,d){
-  const op=operationalWorkLog(c,d)||{};
-  const r=effectiveManualClosingRow(c.id,d);
-  // 締め票入力に片方の時刻しか無い場合、営業側に残っているもう片方を消さない。
-  const manual=(r&&(r.in||r.out))?{...op,in:r.in||op.in||'',out:r.out||op.out||'',absent:false,status:'',manualClosing:true,_manualClosingId:r.id,_updatedAt:r.updatedAt||r.createdAt||''}:null;
-  return chooseAttendanceLog([
-    {log:op,ts:attendanceLogUpdatedMs(op,op?._businessSheetSavedAt||''),rank:2},
-    {log:manual,ts:attendanceLogUpdatedMs(manual),rank:3}
-  ],op);
+function effectiveWorkLog(c,d=state.businessDate){
+  const cast=payrollCastById(c?.id)||c||{};
+  const base=getLog(cast,d)||{};
+  const r=effectiveManualClosingRow(cast.id,d);
+  if(r&&(isRealAttendanceTime(r.in)||isRealAttendanceTime(r.out))){
+    return {...base,in:r.in||base.in||'',out:r.out||base.out||'',absent:false,status:'',manualClosing:true,_manualClosingId:r.id,_updatedAt:r.updatedAt||r.createdAt||base._updatedAt||''};
+  }
+  return base;
 }
+function castAttendedOnDate(c,d){
+  const l=effectiveWorkLog(c,d)||{};
+  if(attendanceLogExplicitlyCleared(l)||isAbsentLog(l))return false;
+  return isRealAttendanceTime(l.in)||isRealAttendanceTime(l.out);
+}
+
 function liveAttendanceCanAccrue(d){return !!(state.businessOpen&&d===state.businessDate&&d===bizDate(now))}
 function workMin(c,d){let l=effectiveWorkLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み';if(!hasOut&&!liveAttendanceCanAccrue(d))return 0;let e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){let l=effectiveWorkLog(c,d);if(!isAbsentLog(l)&&l.in&&l.in!=='休み'&&(!l.out||l.out==='休み')&&!liveAttendanceCanAccrue(d))return '未退勤';return dur(workMin(c,d))}
-function stats(cid,d){let cast=(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[],wheelBackPrice=Number(i.baseWheelPrice??i.price)||0;if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=wheelBackPrice*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=wheelBackPrice*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});manualClosingRowsForDate(d).filter(x=>x.castId===cid||(cast&&historicalCastMatches(x,cast))).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
-function wage(c,d){let mr=effectiveManualClosingRow(c.id,d);if(mr&&Number(mr.manualHourly||0)>0)return Number(mr.manualHourly);let s=stats(c.id,d),bs=castBackSettings(c),has=!!(s.nom||s.dohan||Number(s.nomSet||0)>0||Number(s.nomSub||0)>0||Number(s.dohanBack||0)>0),af=!!(s.after||Number(s.afterBack||0)>0),base=bs.hourly||2500,rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);return rate}
+function stats(cid,d){let cast=payrollCastById(cid)||(state.casts||[]).find(c=>c.id===cid)||{}, bs=castBackSettings(cast);let o={dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0};state.sales.filter(s=>s.businessDate===d).forEach(s=>{let t=s.table,n=t.nominations||[];if(n.includes(cid)){o.nom++;o.nomSet+=repeatChargeCount(t)*bs.nomSetBack;o.nomSub+=s.subtotal*(bs.nomSubRate/100)/(n.length||1)}if((t.dohan||[]).includes(cid)){o.dohan++;o.dohanBack+=bs.dohanBack}if((t.after||[]).includes(cid)){o.after++;o.afterBack+=bs.afterBack}{let jc=jounaiCountForCast(t,cid);if(jc){o.jounai+=jc;o.jounaiBack+=jc*bs.jounaiBack}}(t.items||[]).forEach(i=>{if(i.type==='drink'&&i.castId===cid){o.dbQty+=i.qty;o.dbBack+=bs.dbBack*i.qty}if(i.type==='castShot'&&i.castId===cid){o.sbQty+=i.qty;o.sbBack+=bs.sbBack*i.qty}if(i.type==='wheel'){let dr=i.drinkers||[],wheelBackPrice=Number(i.baseWheelPrice??i.price)||0;if(n.includes(cid)){o.wheelCount+=i.qty;o.wheelBack+=wheelBackPrice*(bs.wheelNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.wheelCount+=i.qty;o.wheelBack+=wheelBackPrice*((n.length?bs.wheelFreeRate:bs.wheelFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}if(i.type==='champagne'){let dr=i.drinkers||[],base=Math.max(0,i.price-(i.cost||0));if(n.includes(cid)){o.champCount+=i.qty;o.champBack+=base*(bs.champNomRate/100)/(n.length||1)*i.qty}else if(dr.includes(cid)){let free=dr.filter(x=>!n.includes(x));o.champCount+=i.qty;o.champBack+=base*((n.length?bs.champFreeRate:bs.champFullFreeRate)/100)/(free.length||dr.length||1)*i.qty}}})});manualClosingRowsForDate(d).filter(x=>x.castId===cid||(cast&&historicalCastMatches(x,cast))).forEach(x=>{let b=x.linkedBase||{};const v=k=>Number(x[k]||0)-Number(b[k]||0);o.dbQty+=v('dbQty');o.dbBack+=v('dbBack');o.sbQty+=v('sbQty');o.sbBack+=v('sbBack');o.wheelCount+=v('wheelCount');o.wheelBack+=v('wheelBack');o.champCount+=v('champCount');o.champBack+=v('champBack');o.jounai+=v('jounai');o.jounaiBack+=v('jounaiBack');o.nom+=v('nom');o.nomSet+=v('nomSet');o.nomSub+=v('nomSub');o.dohan+=v('dohan');o.dohanBack+=v('dohanBack');o.after+=v('after');o.afterBack+=v('afterBack');o.otherBack+=v('otherBack');});o.back=o.dbBack+o.sbBack+o.jounaiBack+o.dohanBack+o.afterBack+o.nomSet+o.nomSub+o.wheelBack+o.champBack+o.otherBack;return o}
+function wage(c,d){
+  const cast=payrollCastById(c?.id)||c||{};
+  const mr=effectiveManualClosingRow(cast.id,d);
+  if(mr)return manualRowPayroll(mr).rate;
+  let st=stats(cast.id,d),bs=castBackSettings(cast),has=!!(st.nom||st.dohan||Number(st.nomSet||0)>0||Number(st.nomSub||0)>0||Number(st.dohanBack||0)>0),af=!!(st.after||Number(st.afterBack||0)>0),base=bs.hourly||2500,rate=base;
+  if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);
+  return rate;
+}
 function tenMinuteWageUnit(rate){
   const map={2000:340,2500:420,2700:450,2800:470,3000:500};
   rate=Number(rate||0);
@@ -3592,8 +3609,39 @@ function timePayFromMinutes(rate,workMinutes){
   else pay+=Math.round(r/10)*unit;
   return roundPay10(pay);
 }
-function timePay(c,d){return timePayFromMinutes(wage(c,d),workMin(c,d))}
-function daySum(d){let sales=dayRevenueBreakdown(d).total,labor=0,back=0;payrollCastList().forEach(c=>{labor+=timePay(c,d);back+=stats(c.id,d).back});let exp=state.expenses.filter(e=>e.businessDate===d).reduce((a,e)=>a+e.amount,0)+Number(manualDayCloseForDate(d)?.receiptExpense||0);return{sales,labor,back,payroll:labor+back,expenses:exp,profit:sales-labor-back-exp}}
+function timePay(c,d){
+  const cast=payrollCastById(c?.id)||c||{};
+  if(!castAttendedOnDate(cast,d))return 0;
+  const mr=effectiveManualClosingRow(cast.id,d),l=effectiveWorkLog(cast,d)||{};
+  if(mr&&(isRealAttendanceTime(l.in)||isRealAttendanceTime(l.out))){
+    const merged={...mr,in:l.in||'',out:l.out||''};
+    if(!merged.out&&!liveAttendanceCanAccrue(d))return 0;
+    if(merged.in&&merged.out)return manualRowPayroll(merged).timePay;
+  }
+  return timePayFromMinutes(wage(cast,d),workMin(cast,d));
+}
+function emptyPayrollStats(){return {dbQty:0,sbQty:0,dbBack:0,sbBack:0,jounai:0,jounaiBack:0,nom:0,dohan:0,after:0,dohanBack:0,afterBack:0,nomSet:0,nomSub:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,otherBack:0,back:0};}
+function payrollDayCalc(c,d){
+  const cast=payrollCastById(c?.id)||c||{};
+  const log=effectiveWorkLog(cast,d)||{};
+  const attended=castAttendedOnDate(cast,d);
+  const st=attended?stats(cast.id,d):emptyPayrollStats();
+  const labor=attended?Number(timePay(cast,d)||0):0;
+  const back=attended?Number(st.back||0):0;
+  const rate=attended?Number(wage(cast,d)||0):0;
+  return {cast,d,log,attended,st,rate,labor,back,pay:labor+back};
+}
+function dailyPayrollSummary(d){
+  const rows=payrollCastList().map(c=>payrollDayCalc(c,d)).filter(x=>x.attended);
+  const labor=rows.reduce((a,x)=>a+x.labor,0),back=rows.reduce((a,x)=>a+x.back,0);
+  return {rows,labor,back,total:labor+back};
+}
+
+function daySum(d){
+  const sales=dayRevenueBreakdown(d).total,pay=dailyPayrollSummary(d);
+  const exp=state.expenses.filter(e=>e.businessDate===d).reduce((a,e)=>a+e.amount,0)+Number(manualDayCloseForDate(d)?.receiptExpense||0);
+  return {sales,labor:pay.labor,back:pay.back,payroll:pay.total,expenses:exp,profit:sales-pay.total-exp};
+}
 
 function currentManageStart(){return state.manageResetAt||state.businessStartedAt||''}
 function afterCurrentManageStart(iso){
@@ -3646,13 +3694,11 @@ function castIdsInSale(s){
   return uniq(ids);
 }
 function castProfitRow(c,d){
+  const cast=payrollCastById(c?.id)||c||{};
   let assignedSales=0;
-  state.sales.filter(s=>s.businessDate===d).forEach(s=>{
-    let ids=castIdsInSale(s);
-    if(ids.includes(c.id))assignedSales+=(s.total||0)/(ids.length||1);
-  });
-  let labor=timePay(c,d), back=stats(c.id,d).back, cost=labor+back, profit=assignedSales-cost;
-  return {cast:c,sales:assignedSales,labor,back,cost,profit,rate:assignedSales?profit/assignedSales*100:0};
+  state.sales.filter(s=>s.businessDate===d).forEach(s=>{let ids=castIdsInSale(s);if(ids.includes(cast.id))assignedSales+=(s.total||0)/(ids.length||1);});
+  const day=payrollDayCalc(cast,d),cost=day.pay,profit=assignedSales-cost;
+  return {cast,sales:assignedSales,labor:day.labor,back:day.back,cost,profit,rate:assignedSales?profit/assignedSales*100:0};
 }
 function latestBusinessSheet(d){
   return (state.businessSheets||[]).filter(x=>x.businessDate===d).sort((a,b)=>new Date(b.savedAt||0)-new Date(a.savedAt||0))[0]||null;
@@ -3932,19 +3978,13 @@ function cardStatText(l,v){return `<div class="card stat"><div class="label">${l
 function cardStatCount(l,v,unit=''){return cardStatText(l, `${Number(v||0).toLocaleString()}${unit}`)}
 function addExpense(){let a=+exAmount.value||0;if(!a)return;state.expenses.push({id:uuid(),businessDate:state.businessDate,name:exName.value||'支出',amount:a,createdAt:new Date().toISOString()});exName.value='';exAmount.value='';render()}function delExpense(id){if(!requireAdmin()) return;state.expenses=state.expenses.filter(e=>e.id!==id);render()}
 function makeClosing(){
-  let d=state.businessDate,s=daySum(d),bd=dayRevenueBreakdown(d),cd=dayCardDetails(d);
-  const purchaseExpenses=(state.expenses||[]).filter(e=>e.businessDate===d).reduce((sum,e)=>sum+(Number(e.amount)||0),0);
-  const cashAfterExpenses=(Number(bd.cash)||0)-purchaseExpenses;
+  const d=state.businessDate,s=daySum(d),bd=dayRevenueBreakdown(d),cd=dayCardDetails(d),purchaseExpenses=(state.expenses||[]).filter(e=>e.businessDate===d).reduce((sum,e)=>sum+(Number(e.amount)||0),0),cashAfterExpenses=(Number(bd.cash)||0)-purchaseExpenses;
   let totals={db:0,sb:0,jounai:0,dohan:0,after:0,nom:0,wheel:0,champ:0};
-  const closingCasts=payrollCastList().filter(c=>{
-    if(isCastHidden(c)) return false;
-    const l=effectiveWorkLog(c,d)||{};
-    const inTime=String(l.in||'').trim();
-    return !!inTime && inTime!=='休み' && !l.absent && l.status!=='休み' && l.status!=='欠勤' && workMin(c,d)>0;
-  });
-  let rows=closingCasts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=effectiveWorkLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
+  const dayRows=dailyPayrollSummary(d).rows.filter(x=>!isCastHidden(x.cast)&&x.labor>0);
+  const rows=dayRows.map(day=>{const c=day.cast,st=day.st,l=day.log;totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(day.rate)}</td><td class="right">${yen(day.labor)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(day.back)}</td><td class="right">${yen(day.pay)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
   const cardRows=cd.rows.map(x=>`<tr><td>${x.table}</td><td class="right">${yen(x.base)}</td><td class="right">${yen(x.fee)}</td><td class="right">${yen(x.charge)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">カード会計なし</td></tr>';
-  closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveClosingA4(this)">スクショ保存（横A4）</button></div></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金残額（仕入差引）</b><span>${yen(cashAfterExpenses)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`}
+  closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveClosingA4(this)">スクショ保存（横A4）</button></div></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金残額（仕入差引）</b><span>${yen(cashAfterExpenses)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`;
+}
 
 function weeklySubtotalBonusFromNomSub(nomSubTotal){
   const subtotal = Math.round((Number(nomSubTotal)||0) * 20);
@@ -3978,67 +4018,90 @@ function monthDays(base){let first=firstDayOfMonthStr(base), last=lastDayOfMonth
 function weekDates(base){let d=new Date((base||state.businessDate)+'T00:00:00'),day=d.getDay(),sun=new Date(d);sun.setDate(d.getDate()-day);let a=[];for(let i=0;i<7;i++){let x=new Date(sun);x.setDate(sun.getDate()+i);a.push(dateKey(x))}return a}
 function weekDatesNoMonthCross(base){let baseDate=base||state.businessDate;return weekDates(baseDate).map(d=>sameMonth(d,baseDate)?d:null)}
 function initWeekTotals(){return{dbQty:0,dbBack:0,sbQty:0,sbBack:0,wheelCount:0,wheelBack:0,champCount:0,champBack:0,jounai:0,jounaiBack:0,nom:0,nomSet:0,nomSub:0,dohan:0,dohanBack:0,after:0,afterBack:0,labor:0,back:0,pay:0}}
-function addDayToTotals(totals,c,d){let st=stats(c.id,d),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;totals.dbQty+=st.dbQty;totals.dbBack+=st.dbBack;totals.sbQty+=st.sbQty;totals.sbBack+=st.sbBack;totals.wheelCount+=st.wheelCount;totals.wheelBack+=st.wheelBack;totals.champCount+=st.champCount;totals.champBack+=st.champBack;totals.jounai+=st.jounai;totals.jounaiBack+=jounaiBack;totals.nom+=st.nom;totals.nomSet+=st.nomSet;totals.nomSub+=st.nomSub;totals.dohan+=st.dohan;totals.dohanBack+=st.dohanBack;totals.after+=st.after;totals.afterBack+=st.afterBack;totals.labor+=labor;totals.back+=st.back;totals.pay+=labor+st.back;return{st,labor,jounaiBack}}
+function addDayToTotals(totals,c,d,precalc=null){
+  const day=precalc||payrollDayCalc(c,d),st=day.st,jounaiBack=st.jounaiBack||0,labor=day.labor,back=day.back;
+  totals.dbQty+=st.dbQty;totals.dbBack+=st.dbBack;totals.sbQty+=st.sbQty;totals.sbBack+=st.sbBack;totals.wheelCount+=st.wheelCount;totals.wheelBack+=st.wheelBack;totals.champCount+=st.champCount;totals.champBack+=st.champBack;totals.jounai+=st.jounai;totals.jounaiBack+=jounaiBack;totals.nom+=st.nom;totals.nomSet+=st.nomSet;totals.nomSub+=st.nomSub;totals.dohan+=st.dohan;totals.dohanBack+=st.dohanBack;totals.after+=st.after;totals.afterBack+=st.afterBack;totals.labor+=labor;totals.back+=back;totals.pay+=labor+back;
+  return {st,labor,jounaiBack,day};
+}
 function slashWeekRow(){return `<tr><td class="slashCell">／</td>${Array(24).fill('<td class="slashCell">／</td>').join('')}</tr>`}
 function payrollTableHead(){return `<thead><tr><th>日付（曜日）</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB金額</th><th>SB金額</th><th>テキカンB</th><th>シャンパンB</th><th>場内B</th><th>指名セットB</th><th>指名小計B</th><th>同伴B</th><th>アフターB</th><th>バック合計</th><th>日合計</th></tr></thead>`}
-function payrollDayRow(c,d,totals=null){let st=stats(c.id,d),l=effectiveWorkLog(c,d),absent=isAbsentLog(l),labor=timePay(c,d),jounaiBack=st.jounaiBack||0;if(totals){addDayToTotals(totals,c,d)}return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(c,d)}</td><td class="right">${absent?'-':yen(wage(c,d))}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(labor+st.back)}</td></tr>`}
+function payrollDayRow(c,d,totals=null,precalc=null){
+  const day=precalc||payrollDayCalc(c,d),st=day.st,l=day.log||{},absent=!day.attended,labor=day.labor,jounaiBack=st.jounaiBack||0;
+  if(totals)addDayToTotals(totals,day.cast,d,day);
+  return `<tr><td>${dateWithWeekday(d)}</td><td>${absent?'休み':(l.in||0)}</td><td>${absent?'休み':(l.out||0)}</td><td>${absent?'休み':workDur(day.cast,d)}</td><td class="right">${absent?'-':yen(day.rate)}</td><td class="right">${yen(labor)}</td><td class="right">${yen(st.dbBack)}</td><td class="right">${yen(st.sbBack)}</td><td class="right">${yen(st.wheelBack)}</td><td class="right">${yen(st.champBack)}</td><td class="right">${yen(jounaiBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td class="right">${yen(st.dohanBack)}</td><td class="right">${yen(st.afterBack)}</td><td class="right">${yen(day.back)}</td><td class="right">${yen(day.pay)}</td></tr>`;
+}
 function totalsRow(totals){return `<tr><th>合計</th><th></th><th></th><th></th><th></th><th class="right">${yen(totals.labor)}</th><th class="right">${yen(totals.dbBack)}</th><th class="right">${yen(totals.sbBack)}</th><th class="right">${yen(totals.wheelBack)}</th><th class="right">${yen(totals.champBack)}</th><th class="right">${yen(totals.jounaiBack)}</th><th class="right">${yen(totals.nomSet)}</th><th class="right">${yen(totals.nomSub)}</th><th class="right">${yen(totals.dohanBack)}</th><th class="right">${yen(totals.afterBack)}</th><th class="right">${yen(totals.back)}</th><th class="right">${yen(totals.pay)}</th></tr>`}
 function payrollWeekKey(base,castId){return `${castId}|${weekDates(base||state.businessDate).join('|')}`}
 function payrollLockRecord(c,base){state.payrollLocks=state.payrollLocks||{};return state.payrollLocks[payrollWeekKey(base,c.id)]||null}
 function weeklyPayrollCalc(c,base,useLock=true){
-  const wds=weekDates(base||state.businessDate),currentTotals=initWeekTotals();
-  wds.forEach(d=>addDayToTotals(currentTotals,c,d));
-  const lock=useLock?payrollLockRecord(c,base):null;
+  const cast=payrollCastById(c?.id)||c||{},wds=weekDates(base||state.businessDate),daysData=wds.map(d=>payrollDayCalc(cast,d)),currentTotals=initWeekTotals();
+  daysData.forEach(day=>addDayToTotals(currentTotals,cast,day.d,day));
+  const currentBonus=weeklyBonusSummary(currentTotals);
+  const currentGross=Number(currentTotals.pay||0)+Number(currentBonus.totalBonus||0);
+  const currentRate=Number(cast.deductionRate||0),currentDeduction=currentGross*currentRate/100,currentNet=currentGross-currentDeduction,currentPayableYen=Math.round(currentNet);
+  const sourceSignature=simpleHash(JSON.stringify({castId:cast.id,deductionRate:currentRate,days:daysData.map(x=>({d:x.d,in:x.log?.in||'',out:x.log?.out||'',absent:!!x.log?.absent,labor:x.labor,back:x.back,nomSub:x.st.nomSub||0,dohan:x.st.dohan||0,pay:x.pay}))}));
+  let lock=useLock?payrollLockRecord(cast,base):null;
+  if(lock&&lock.sourceSignature!==sourceSignature)lock=null;
   const totals=lock?.totals?deepCopy(lock.totals):currentTotals;
-  const bonus=lock?.bonus?deepCopy(lock.bonus):weeklyBonusSummary(currentTotals);
-  const gross=lock?Number(lock.gross||0):(Number(currentTotals.pay||0)+Number(bonus.totalBonus||0));
-  const rate=lock?Number(lock.deductionRate??c.deductionRate??0):Number(c.deductionRate||0);
-  const deduction=lock?Number(lock.deduction||0):(gross*rate/100);
-  const net=lock?Number(lock.net||0):(gross-deduction);
-  // 画面で支払う1円単位を唯一の基準にする。週間一覧はこの値だけを足す。
-  const payableYen=Number.isFinite(Number(lock?.payableYen))?Number(lock.payableYen):Math.round(net);
-  const days=wds.filter(d=>{const l=effectiveWorkLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;}).length;
-  return {wds,currentTotals,totals,bonus,gross,rate,deduction,net,payableYen,days,lock};
+  const bonus=lock?.bonus?deepCopy(lock.bonus):currentBonus;
+  const gross=lock?Number(lock.gross||0):currentGross;
+  const rate=lock?Number(lock.deductionRate??currentRate):currentRate;
+  const deduction=lock?Number(lock.deduction||0):currentDeduction;
+  const net=lock?Number(lock.net||0):currentNet;
+  const payableYen=lock&&Number.isFinite(Number(lock.payableYen))?Number(lock.payableYen):currentPayableYen;
+  const days=daysData.filter(x=>x.attended).length;
+  return {cast,wds,daysData,currentTotals,totals,bonus,gross,rate,deduction,net,payableYen,days,lock,sourceSignature};
 }
 function require1704(action){let p=prompt('パスワードを入力してください'); if(p!==PROFIT_PASS){alert('パスワードが違います');return false;} if(typeof action==='function')action(); return true;}
-function freezePayroll(castId,base){let c=state.casts.find(x=>x.id===castId);if(!c)return;let r=weeklyPayrollCalc(c,base,false);state.payrollLocks=state.payrollLocks||{};state.payrollLocks[payrollWeekKey(base,c.id)]={castId:c.id,castName:c.name,baseDate:base,weekDates:r.wds,fixedAt:new Date().toISOString(),totals:deepCopy(r.currentTotals),bonus:deepCopy(r.bonus),gross:r.gross,deduction:r.deduction,net:r.net,payableYen:r.payableYen,deductionRate:r.rate};save();alert('給料を確定しました。解除・修正には1704が必要です。');makeWeek();}
+function freezePayroll(castId,base){
+  const c=payrollCastById(castId);if(!c)return;
+  const r=weeklyPayrollCalc(c,base,false);state.payrollLocks=state.payrollLocks||{};
+  state.payrollLocks[payrollWeekKey(base,c.id)]={castId:c.id,castName:c.name,baseDate:base,weekDates:r.wds,fixedAt:new Date().toISOString(),totals:deepCopy(r.currentTotals),bonus:deepCopy(r.bonus),gross:r.gross,deduction:r.deduction,net:r.net,payableYen:r.payableYen,deductionRate:r.rate,sourceSignature:r.sourceSignature};
+  save();alert('給料を確定しました。解除・修正には1704が必要です。');makeWeek();
+}
 function unlockPayroll(castId,base){require1704(()=>{state.payrollLocks=state.payrollLocks||{};delete state.payrollLocks[payrollWeekKey(base,castId)];save();alert('給与凍結を解除しました。');makeWeek();});}
-function payrollSummaryCards(c,totals,label='週間',base=state.businessDate) {
-  const weekly=label==='週間'?weeklyPayrollCalc(c,base,true):null;
-  let lock=weekly?.lock||null;
-  let shownTotals=weekly?weekly.totals:totals;
-  let bonus=weekly?weekly.bonus:weeklyBonusSummary(totals), gross=weekly?weekly.gross:(totals.pay+bonus.totalBonus), deduction=weekly?weekly.deduction:(gross*((c.deductionRate||0)/100)), net=weekly?weekly.net:(gross-deduction), payableYen=weekly?weekly.payableYen:Math.round(net);
-  let fixed=lock?`<div class="card" style="border-color:#16a34a;background:#f0fdf4"><div class="row"><b>給料確定済み：${new Date(lock.fixedAt).toLocaleString()}</b><button class="btn warn small" onclick="unlockPayroll('${c.id}','${base}')">給与凍結解除</button></div><p class="muted">確定時点の金額を表示しています。解除には1704が必要です。</p></div>`:'';
-  let action=label==='週間'&&!lock?`<div style="margin-top:10px"><button class="btn ok" onclick="freezePayroll('${c.id}','${base}')">給料確定</button></div>`:'';
-  let itemTotals=`<div class="section">${label}項目別合計</div><div class="summary" style="margin-top:10px">${cardStat('DB金額',shownTotals.dbBack)}${cardStat('SB金額',shownTotals.sbBack)}${cardStat('テキカン金額',shownTotals.wheelBack)}${cardStat('シャンパン金額',shownTotals.champBack)}${cardStat('場内金額',shownTotals.jounaiBack)}${cardStat('指名セットB',shownTotals.nomSet)}${cardStat('指名小計B',shownTotals.nomSub)}${cardStat('同伴金額',shownTotals.dohanBack)}${cardStat('アフター金額',shownTotals.afterBack)}${cardStat('バック総額',shownTotals.back)}</div>`;
-  let hasBonus = Number(bonus.totalBonus || 0) > 0;
-  let bonusBlock = hasBonus ? `<div class="section">${label}ボーナス</div><div class="summary" style="margin-top:10px">${cardStat('同伴ボーナス',bonus.dohanBonus)}${cardStat('売上小計ボーナス',bonus.subtotalBonus)}${cardStat(`${label}ボーナス合計`,bonus.totalBonus)}</div>` : '';
-  let bonusSummaryCard = hasBonus ? cardStat(`${label}ボーナス`, bonus.totalBonus) : '';
-  return `${fixed}${itemTotals}${bonusBlock}<div class="section">${label}給与まとめ</div><div class="summary" style="margin-top:10px">${cardStat('時間給合計',shownTotals.labor)}${cardStat('バック総額',shownTotals.back)}${bonusSummaryCard}${cardStat('総額',gross)}${cardStatText('控除率',(lock?lock.deductionRate:(c.deductionRate||0))+'%')}${cardStat('控除額',deduction)}${cardStat('支給額',payableYen)}</div>${action}`
+function payrollSummaryCards(c,totals,label='週間',base=state.businessDate,precalc=null) {
+  const cast=payrollCastById(c?.id)||c||{};
+  const weekly=label==='週間'?(precalc||weeklyPayrollCalc(cast,base,true)):null;
+  const lock=weekly?.lock||null;
+  const shownTotals=weekly?weekly.totals:totals;
+  const bonus=weekly?weekly.bonus:weeklyBonusSummary(totals),gross=weekly?weekly.gross:(totals.pay+bonus.totalBonus),deduction=weekly?weekly.deduction:(gross*((cast.deductionRate||0)/100)),net=weekly?weekly.net:(gross-deduction),payableYen=weekly?weekly.payableYen:Math.round(net);
+  const fixed=lock?`<div class="card" style="border-color:#16a34a;background:#f0fdf4"><div class="row"><b>給料確定済み：${new Date(lock.fixedAt).toLocaleString()}</b><button class="btn warn small" onclick="unlockPayroll('${cast.id}','${base}')">給与凍結解除</button></div><p class="muted">確定時点と現在データが一致しているため確定金額を表示しています。</p></div>`:'';
+  const action=label==='週間'&&!lock?`<div style="margin-top:10px"><button class="btn ok" onclick="freezePayroll('${cast.id}','${base}')">給料確定</button></div>`:'';
+  const itemTotals=`<div class="section">${label}項目別合計</div><div class="summary" style="margin-top:10px">${cardStat('DB金額',shownTotals.dbBack)}${cardStat('SB金額',shownTotals.sbBack)}${cardStat('テキカン金額',shownTotals.wheelBack)}${cardStat('シャンパン金額',shownTotals.champBack)}${cardStat('場内金額',shownTotals.jounaiBack)}${cardStat('指名セットB',shownTotals.nomSet)}${cardStat('指名小計B',shownTotals.nomSub)}${cardStat('同伴金額',shownTotals.dohanBack)}${cardStat('アフター金額',shownTotals.afterBack)}${cardStat('バック総額',shownTotals.back)}</div>`;
+  const hasBonus=Number(bonus.totalBonus||0)>0;
+  const bonusBlock=hasBonus?`<div class="section">${label}ボーナス</div><div class="summary" style="margin-top:10px">${cardStat('同伴ボーナス',bonus.dohanBonus)}${cardStat('売上小計ボーナス',bonus.subtotalBonus)}${cardStat(`${label}ボーナス合計`,bonus.totalBonus)}</div>`:'';
+  const bonusSummaryCard=hasBonus?cardStat(`${label}ボーナス`,bonus.totalBonus):'';
+  return `${fixed}${itemTotals}${bonusBlock}<div class="section">${label}給与まとめ</div><div class="summary" style="margin-top:10px">${cardStat('時間給合計',shownTotals.labor)}${cardStat('バック総額',shownTotals.back)}${bonusSummaryCard}${cardStat('総額',gross)}${cardStatText('控除率',(lock?lock.deductionRate:(cast.deductionRate||0))+'%')}${cardStat('控除額',deduction)}${cardStat('支給額',payableYen)}</div>${action}`;
 }
 
-function weeklyCastHasAttendance(c,wds){
-  // 週間表と同じく、通常の出退勤ログより締め票入力を優先して判定する。
-  return (wds||[]).some(d=>{let l=effectiveWorkLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;});
-}
-function weeklyOverviewPayForCast(c,base){
-  // 個別週間表と完全に同じ計算結果を返す。別計算は禁止。
-  return weeklyPayrollCalc(c,base,true);
-}
+function weeklyCastHasAttendance(c,wds){return (wds||[]).some(d=>payrollDayCalc(c,d).attended);}
+function weeklyOverviewPayForCast(c,base){return weeklyPayrollCalc(c,base,true);}
 function renderWeeklyOverview(){
-  const area=document.getElementById('weeklyOverviewArea'); if(!area)return;
-  const inp=document.getElementById('weeklyOverviewDate');
-  if(inp&&!inp.value)inp.value=state.businessDate;
-  const base=(inp&&inp.value)||state.businessDate,wds=weekDates(base);
-  const range=document.getElementById('weeklyOverviewRange'); if(range)range.innerHTML=`<span>${wds[0]} 〜 ${wds[6]}</span>`;
-  let items=payrollCastList().filter(c=>weeklyCastHasAttendance(c,wds)).map(c=>({c,...weeklyOverviewPayForCast(c,base)}));
-  let netTotal=items.reduce((a,x)=>a+Number(x.payableYen||0),0);
-  let rows=items.map(x=>`<tr><td>${esc(x.c.name)}</td><td class="right">${x.days}日</td><td class="right">${yen(x.payableYen)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">この週の出勤キャストはいません</td></tr>';
+  const area=document.getElementById('weeklyOverviewArea');if(!area)return;
+  const inp=document.getElementById('weeklyOverviewDate');if(inp&&!inp.value)inp.value=state.businessDate;
+  const base=(inp&&inp.value)||state.businessDate,wds=weekDates(base),range=document.getElementById('weeklyOverviewRange');if(range)range.innerHTML=`<span>${wds[0]} 〜 ${wds[6]}</span>`;
+  const items=payrollCastList().map(c=>weeklyPayrollCalc(c,base,true)).filter(x=>x.days>0);
+  const netTotal=items.reduce((a,x)=>a+Number(x.payableYen||0),0);
+  const rows=items.map(x=>`<tr><td>${esc(x.cast.name)}</td><td class="right">${x.days}日</td><td class="right">${yen(x.payableYen)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">この週の出勤キャストはいません</td></tr>';
   area.innerHTML=`<div class="summary">${cardStatCount('出勤キャスト',items.length,'人')}${cardStat('支給額合計',netTotal)}</div><div class="card" style="margin-top:12px"><div class="row"><h3>${wds[0]}〜${wds[6]} 出勤キャスト一覧</h3></div><div class="scroll"><table><thead><tr><th>キャスト</th><th class="right">出勤日数</th><th class="right">支給額</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function makeWeek(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}let base=weekDate.value||state.businessDate, totals=initWeekTotals(), wds=weekDates(base);let rows=wds.map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${wds[0]}〜${wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveWeeklyA4(this)">スクショ保存（横A4）</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',base)}</div>`}
-function makeMonthSheet(){let c=state.casts.find(x=>x.id===weekCast.value);if(!c)return;let base=weekDate.value||state.businessDate, totals=initWeekTotals();let rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base),this)">スクショ保存（縦A4）</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`}
-function showWeekHistoryMonth(ym){let casts=payrollCastList();let weeks=[];let first=ym+'-01', days=monthDays(first);let used=new Set();days.forEach(d=>{let wk=weekDates(d).join('|');if(!used.has(wk)){used.add(wk);weeks.push(d)}});historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><h3>週間表履歴 ${ym}</h3><p class="muted">月跨ぎありの週間表を履歴データから再表示します。</p>${casts.map(c=>`<div class="section">${c.name}</div>${weeks.map(w=>{let totals=initWeekTotals();let rows=weekDates(w).map(d=>payrollDayRow(c,d,totals)).join('');return `<div class="card" style="margin:10px 0"><h4>${weekDates(w)[0]}〜${weekDates(w)[6]}</h4><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'週間',w)}</div>`}).join('')}`).join('')}</div>`}
+function makeWeek(){
+  const c=payrollCastById(weekCast.value);
+  if(!c){weekArea.innerHTML='<div class="card"><p class="muted">キャストを選択してください。</p></div>';return;}
+  const base=weekDate.value||state.businessDate,weekly=weeklyPayrollCalc(c,base,true),rows=weekly.daysData.map(day=>payrollDayRow(c,day.d,null,day)).join('');
+  weekArea.innerHTML=`<div class="card printable-sheet" id="weeklyPrintArea"><div class="row"><h2>${c.name} 週間表 ${weekly.wds[0]}〜${weekly.wds[6]}</h2><div class="row no-print"><button class="btn out" onclick="printElement('weeklyPrintArea')">週間表印刷</button><button class="btn blue" onclick="saveWeeklyA4(this)">スクショ保存（横A4）</button></div></div><div class="muted">日曜開始・土曜締め。月跨ぎあり。週間ボーナスは週最終日の月へ計上。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(weekly.currentTotals)}</tbody></table></div>${payrollSummaryCards(c,weekly.currentTotals,'週間',base,weekly)}</div>`;
+}
+function makeMonthSheet(){
+  const c=payrollCastById(weekCast.value);if(!c)return;
+  const base=weekDate.value||state.businessDate,totals=initWeekTotals(),rows=monthDays(base).map(d=>payrollDayRow(c,d,totals)).join('');
+  weekArea.innerHTML=`<div class="card printable-sheet" id="monthlyPrintArea"><div class="row"><h2>${c.name} 月間表 ${monthKeyOf(base)}</h2><div class="row no-print"><button class="btn out" onclick="printElement('monthlyPrintArea')">月間表印刷</button><button class="btn blue" onclick="saveSheetScreenshot('monthlyPrintArea',safeFileName(c.name)+'_月間表_'+monthKeyOf(base),this)">スクショ保存（縦A4）</button></div></div><div class="muted">月間表は金額中心の印刷用表示です。</div><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(totals)}</tbody></table></div>${payrollSummaryCards(c,totals,'月間',base)}</div>`;
+}
+function showWeekHistoryMonth(ym){
+  const casts=payrollCastList(),weeks=[],first=ym+'-01',days=monthDays(first),used=new Set();
+  days.forEach(d=>{const wk=weekDates(d).join('|');if(!used.has(wk)){used.add(wk);weeks.push(d)}});
+  historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><h3>週間表履歴 ${ym}</h3><p class="muted">月跨ぎありの週間表を履歴データから再表示します。</p>${casts.map(c=>`<div class="section">${c.name}</div>${weeks.map(w=>{const weekly=weeklyPayrollCalc(c,w,true),rows=weekly.daysData.map(day=>payrollDayRow(c,day.d,null,day)).join('');return `<div class="card" style="margin:10px 0"><h4>${weekly.wds[0]}〜${weekly.wds[6]}</h4><div class="scroll"><table>${payrollTableHead()}<tbody>${rows}${totalsRow(weekly.currentTotals)}</tbody></table></div>${payrollSummaryCards(c,weekly.currentTotals,'週間',w,weekly)}</div>`}).join('')}`).join('')}</div>`;
+}
 function addCast(){let n=newCast.value.trim();if(!n)return;let base=normalizeBackSettings(state.defaultBackSettings);let custom=Number(newCastDeductionCustom.value||'');if(Number.isFinite(custom)&&custom>0)base.deductionRate=custom;let selected=Number(newCastDeduction?.value||'');if(!newCastDeductionCustom.value&&Number.isFinite(selected)&&selected>0)base.deductionRate=selected;let same=(state.casts||[]).find(c=>(c.name||'').trim()===n);if(same){if(same.hidden){if(confirm(`${n} は非表示キャストに存在します。再表示しますか？`)){same.hidden=false;same.status=same.status||'off';same.useDefaultBack=true;same.backSettings=base;same.deductionRate=base.deductionRate;same.hourly=base.hourly;newCast.value='';newCastDeductionCustom.value='';render();return;}}else{alert(`${n} は既に登録されています`);return;}}state.casts.push({id:uuid(),name:n,status:'off',hourly:base.hourly,deductionRate:base.deductionRate,useDefaultBack:true,backSettings:base,logs:{},hidden:false});newCast.value='';newCastDeductionCustom.value='';render()}
 function hideCast(id){let c=state.casts.find(x=>x.id===id);if(!c)return;if(!confirm(`${c.name} を非表示にしますか？
 過去売上・給与履歴・月間表/週間表には残り、新規の指名・出勤・ドリンク選択には出なくなります。`))return;c.hidden=true;if(c.status==='on')c.status='off';render()}
@@ -4318,7 +4381,7 @@ async function saveClosingA4(button){
 
 async function saveWeeklyA4(button){
   const source=document.getElementById('weeklyPrintArea');
-  const selectedCast=state.casts.find(x=>x.id===weekCast.value);
+  const selectedCast=payrollCastById(weekCast.value);
   const base=weekDate.value||state.businessDate;
   const wds=weekDates(base);
   const fileBase=safeFileName((selectedCast?selectedCast.name:'キャスト')+'_週間表_'+wds[0]+'_'+wds[6]);
@@ -4905,14 +4968,7 @@ function resetManualCastForm(){
   updateManualBackPreview();updateManualProfitPreview();
 }
 function cancelManualClosingEdit(){resetManualCastForm();}
-function manualPayrollForDate(d){
-  let labor=0,back=0;
-  payrollCastList().forEach(c=>{
-    labor+=Number(timePay(c,d)||0);
-    back+=Number(stats(c.id,d).back||0);
-  });
-  return {labor,back,total:labor+back};
-}
+function manualPayrollForDate(d){const p=dailyPayrollSummary(d);return {labor:p.labor,back:p.back,total:p.total};}
 function updateManualProfitPreview(){
   const box=document.getElementById('manualProfitPreview');if(!box)return;
   const d=document.getElementById('manualCloseDate')?.value||state.businessDate;
@@ -4953,7 +5009,7 @@ function invalidatePayrollLockForCastDate(c,d){
   return true;
 }
 function saveManualAttendanceEdit(castId,d){
-  const c=(state.casts||[]).find(x=>x.id===castId);if(!c)return;
+  const c=payrollCastById(castId);if(!c)return;
   const rawIn=document.getElementById(`manualAttIn_${castId}`)?.value||'';
   const rawOut=document.getElementById(`manualAttOut_${castId}`)?.value||'';
   const inTime=rawIn?normalizeTimeValue(rawIn,'exact',25):'';
@@ -4973,7 +5029,7 @@ function saveManualAttendanceEdit(castId,d){
   const selected=document.getElementById('manualCloseCast');if(selected&&selected.value===castId&&!manualClosingEditId)loadOperationalCastIntoForm();
 }
 function deleteManualAttendanceEdit(castId,d){
-  const c=(state.casts||[]).find(x=>x.id===castId);if(!c)return;
+  const c=payrollCastById(castId);if(!c)return;
   if(!confirm(`${c.name} の ${d} の出勤記録を削除しますか？`))return;
   const updatedAt=new Date().toISOString();
   syncManualClosingAttendanceFields(c,d,'','',true,updatedAt);
@@ -5002,7 +5058,7 @@ function editManualClosingSheet(id){
 function saveManualClosingSheet(){
   const d=(document.getElementById('manualCloseDate')?.value||state.businessDate);
   const castId=document.getElementById('manualCloseCast')?.value;
-  const cast=(state.casts||[]).find(c=>c.id===castId);
+  const cast=payrollCastById(castId);
   if(!d){alert('営業日を選んでください');return;}
   saveManualDayCloseFromForm(d);
   if(!cast){save();render();alert('締め票の売上情報を保存しました。');return;}
@@ -5049,12 +5105,12 @@ function manualRowWorkMinutes(r){
   const a=parseDT(r.businessDate,r.in),b=parseDT(r.businessDate,r.out);if(!a||!b)return 0;if(b<a)b.setDate(b.getDate()+1);return round10(Math.max(0,Math.floor((b-a)/60000)));
 }
 function manualRowPayroll(r){
-  const c=(state.casts||[]).find(x=>x.id===r.castId)||{},bs=castBackSettings(c),base=Number(bs.hourly||2500);
-  const has=!!(Number(r.nomSet||0)>0||Number(r.nomSub||0)>0||Number(r.dohan||0)>0||Number(r.dohanBack||0)>0);
-  const af=!!(Number(r.after||0)>0||Number(r.afterBack||0)>0);
-  let rate=Number(r.manualHourly||0);if(!rate){rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);}
+  const c=payrollCastById(r?.castId)||(state.casts||[]).find(x=>x.id===r?.castId)||{},bs=castBackSettings(c),base=Number(bs.hourly||2500);
+  const has=!!(Number(r?.nomSet||0)>0||Number(r?.nomSub||0)>0||Number(r?.dohan||0)>0||Number(r?.dohanBack||0)>0);
+  const af=!!(Number(r?.after||0)>0||Number(r?.afterBack||0)>0);
+  let rate=Number(r?.manualHourly||0);if(!rate){rate=base;if(has&&af)rate=base+(bs.raiseBoth||((bs.raiseNomDohan||0)+(bs.raiseAfter||0)));else if(has)rate=base+(bs.raiseNomDohan||0);else if(af)rate=base+(bs.raiseAfter||0);}
   const timePayValue=timePayFromMinutes(rate,manualRowWorkMinutes(r));
-  const back=Number(r.dbBack||0)+Number(r.sbBack||0)+Number(r.jounaiBack||0)+Number(r.dohanBack||0)+Number(r.afterBack||0)+Number(r.nomSet||0)+Number(r.nomSub||0)+Number(r.wheelBack||0)+Number(r.champBack||0)+Number(r.otherBack||0);
+  const back=Number(r?.dbBack||0)+Number(r?.sbBack||0)+Number(r?.jounaiBack||0)+Number(r?.dohanBack||0)+Number(r?.afterBack||0)+Number(r?.nomSet||0)+Number(r?.nomSub||0)+Number(r?.wheelBack||0)+Number(r?.champBack||0)+Number(r?.otherBack||0);
   return {rate,timePay:timePayValue,back,total:timePayValue+back};
 }
 function deleteManualClosingSheet(id){
@@ -5135,29 +5191,11 @@ function saveRegisterClose(){
   render();
 }
 function exportSheetCSV(){
-  const d=state.businessDate;
-  const s=daySum(d);
-  const header=['日付','売上','人件費','バック','給与合計','仕入れ支出','純利益'];
-  const rows=[header,[d,Math.round(s.sales),Math.round(s.labor),Math.round(s.back),Math.round(s.payroll),Math.round(s.expenses),Math.round(s.profit)]];
-  rows.push([]);
-  rows.push(['キャスト','出勤','退勤','勤務時間','時給','時間給','DB杯数','DBバック','SB杯数','SBバック','場内本数','場内バック','同伴','アフター','指名セット','指名小計','テキカンB','シャンパンB','バック合計','給与']);
-  state.casts.forEach(c=>{
-    let st=stats(c.id,d), l=effectiveWorkLog(c,d), tp=timePay(c,d);
-    rows.push([c.name,l.in||0,l.out||0,workDur(c,d),Math.round(wage(c,d)),Math.round(tp),st.dbQty,Math.round(st.dbBack),st.sbQty,Math.round(st.sbBack),st.jounai,Math.round(st.jounaiBack),st.dohan,st.after,Math.round(st.nomSet),Math.round(st.nomSub),Math.round(st.wheelBack),Math.round(st.champBack),Math.round(st.back),Math.round(st.back+tp)]);
-  });
-  rows.push([]);
-  rows.push(['仕入れ支出']);
-  (state.expenses||[]).filter(e=>e.businessDate===d).forEach(e=>rows.push([e.name,e.amount]));
-  rows.push([]);
-  rows.push(['入出金']);
-  (state.cashFlows||[]).filter(e=>e.businessDate===d).forEach(e=>rows.push([e.type==='in'?'入金':'出金',e.name,e.amount]));
-  const csv=rows.map(r=>r.map(v=>`"${String(v??'').replaceAll('"','""')}"`).join(',')).join('\n');
-  const blob=new Blob(["\ufeff"+csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`${d}_締め票_スプレッドシート用.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  const d=state.businessDate,s=daySum(d),header=['日付','売上','人件費','バック','給与合計','仕入れ支出','純利益'],rows=[header,[d,Math.round(s.sales),Math.round(s.labor),Math.round(s.back),Math.round(s.payroll),Math.round(s.expenses),Math.round(s.profit)]];
+  rows.push([]);rows.push(['キャスト','出勤','退勤','勤務時間','時給','時間給','DB杯数','DBバック','SB杯数','SBバック','場内本数','場内バック','同伴','アフター','指名セット','指名小計','テキカンB','シャンパンB','バック合計','給与']);
+  dailyPayrollSummary(d).rows.forEach(day=>{const c=day.cast,st=day.st,l=day.log;rows.push([c.name,l.in||0,l.out||0,workDur(c,d),Math.round(day.rate),Math.round(day.labor),st.dbQty,Math.round(st.dbBack),st.sbQty,Math.round(st.sbBack),st.jounai,Math.round(st.jounaiBack),st.dohan,st.after,Math.round(st.nomSet),Math.round(st.nomSub),Math.round(st.wheelBack),Math.round(st.champBack),Math.round(day.back),Math.round(day.pay)]);});
+  rows.push([]);rows.push(['仕入れ支出']);(state.expenses||[]).filter(e=>e.businessDate===d).forEach(e=>rows.push([e.name,e.amount]));rows.push([]);rows.push(['入出金']);(state.cashFlows||[]).filter(e=>e.businessDate===d).forEach(e=>rows.push([e.type==='in'?'入金':'出金',e.name,e.amount]));
+  const csv=rows.map(r=>r.map(v=>`"${String(v??'').replaceAll('"','""')}"`).join(',')).join('\n'),blob=new Blob(["\ufeff"+csv],{type:'text/csv;charset=utf-8'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${d}_締め票_スプレッドシート用.csv`;a.click();URL.revokeObjectURL(a.href);
 }
 
 
@@ -5247,6 +5285,7 @@ function runPosSelfTests(){
   console.assert(timePayFromMinutes(3000,300)===15000 && timePayFromMinutes(3000,310)===15500 && timePayFromMinutes(3000,320)===16000 && timePayFromMinutes(3000,330)===16500 && timePayFromMinutes(3000,340)===17000 && timePayFromMinutes(3000,350)===17500,'00分/30分軸の時間給計算');
   console.assert(timePayFromMinutes(2800,320)===14930 && timePayFromMinutes(2800,330)===15400 && timePayFromMinutes(2800,340)===15870,'2800円も00分/30分軸で計算');
   console.assert(timePay({id:'__test__'},'2099-01-01')%10===0,'時間給の下一桁は必ず0');
+  console.assert(typeof payrollDayCalc==='function'&&typeof dailyPayrollSummary==='function'&&typeof weeklyPayrollCalc==='function','給与計算は日次/週間の共通関数を使用');
   console.assert(typeof updateTableSetPriceInline==='function','卓画面一人分セット料金の直接修正関数が存在する');
   console.assert(document.documentElement.innerHTML.includes('一人分セット料金'),'卓画面に一人分セット料金入力欄が存在する');
   console.assert(typeof castTimePickerHtml==='function','キャスト出退勤の表示も10分刻みセレクト式');
