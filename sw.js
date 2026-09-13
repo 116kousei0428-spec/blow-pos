@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v7-receipt-edit-fix';
+const CACHE_NAME = 'blow-amami-pos-mobile-v8-attendance-link-fix';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',

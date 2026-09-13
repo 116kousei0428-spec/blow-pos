@@ -982,7 +982,9 @@ async function pollCloudChanges(){
     incoming.manualClosingDeleted=mergedDeleted;
     incoming.manualClosingSheets=mergeManualClosingRecords(localManualClosingSheets,incoming.manualClosingSheets||[],mergedDeleted);
     incoming.manualClosingDaySheets=mergeManualClosingDayRecords(localManualClosingDaySheets,incoming.manualClosingDaySheets||[]);
+    incoming.casts=mergeCastAttendanceLogs(state.casts||[],incoming.casts||[]);
     state=incoming;
+    repairAttendanceLinks();
     repairActiveTableTimes(); repairAllExtensionDurations(); reconcileAmamiTables();
     const liveJounaiFixed=repairExistingLiveJounaiPhases();
     lastRemoteUpdatedAt=remoteTs||Date.now(); lastRemoteSignature=remoteSig; lastLocalStateJson=remoteSig;
@@ -1159,6 +1161,7 @@ async function cloudLoad(){
     createAutoBackup('クラウド読込前退避');
     applyingRemoteState=true;
     state=normalizeRestoreDataForLocalStorage(nextState);
+    repairAttendanceLinks();
     repairActiveTableTimes();
     repairAllExtensionDurations();
     repairExistingLiveJounaiPhases();
@@ -1691,18 +1694,117 @@ function currentDayHasData(d=state.businessDate){
     (state.expenses||[]).some(x=>x.businessDate===d) ||
     (state.cashFlows||[]).some(x=>x.businessDate===d) ||
     (state.closings||[]).some(x=>x.businessDate===d) ||
-    (state.casts||[]).some(c=>{let l=(c.logs||{})[d]||{};return l.in||l.out;});
+    (state.casts||[]).some(c=>attendanceLogHasValue(operationalWorkLog(c,d)));
 }
 function ensureAbsentLogsForDay(d=state.businessDate){
   (state.casts||[]).forEach(c=>{
     c.logs=c.logs||{};
-    let l=c.logs[d]||{};
-    if(!l.in&&!l.out){
-      c.logs[d]={in:'',out:'',absent:true,status:'休み'};
+    const l=operationalWorkLog(c,d)||{};
+    if(attendanceLogHasValue(l)){
+      if(!attendanceLogHasValue(c.logs[d]))writeCastAttendanceLog(c,d,l,{updatedAt:l._updatedAt||l._businessSheetSavedAt||new Date().toISOString()});
+      return;
     }
+    c.logs[d]={in:'',out:'',absent:true,status:'休み',_updatedAt:new Date().toISOString(),_sessionStartAt:(d===state.businessDate?state.businessStartedAt||'':'')};
   });
 }
 function isAbsentLog(l){return !!(l&&l.absent);}
+function attendanceLogHasValue(l){
+  if(!l)return false;
+  if(isAbsentLog(l))return true;
+  const inv=String(l.in||'').trim(),outv=String(l.out||'').trim();
+  if(inv==='00:00'&&outv==='00:00')return false;
+  if(l._zeroReset===true && (!inv||inv==='00:00') && (!outv||outv==='00:00'))return false;
+  return !!(inv||outv);
+}
+function attendanceLogExplicitlyCleared(l){return !!(l&&l._attendanceCleared===true);}
+function businessSheetAttendanceLog(c,d){
+  const sheets=(state.businessSheets||[]).filter(x=>x&&x.businessDate===d).sort((a,b)=>new Date(b.savedAt||b.editedAt||0)-new Date(a.savedAt||a.editedAt||0));
+  for(const sheet of sheets){
+    const rows=Array.isArray(sheet.attendance)?sheet.attendance:[];
+    const row=rows.find(x=>x&&((x.castId&&x.castId===c.id)||(!x.castId&&x.castName===c.name)));
+    const l=row&&row.log;
+    if(attendanceLogHasValue(l))return {...deepCopy(l),_fromBusinessSheet:true,_businessSheetSavedAt:sheet.savedAt||sheet.editedAt||''};
+  }
+  return null;
+}
+function operationalWorkLog(c,d=state.businessDate){
+  const direct=getLog(c,d)||{};
+  if(attendanceLogHasValue(direct)||attendanceLogExplicitlyCleared(direct))return direct;
+  const archived=businessSheetAttendanceLog(c,d);
+  return archived||direct;
+}
+function syncBusinessSheetAttendanceForCast(c,d,log){
+  (state.businessSheets||[]).filter(x=>x&&x.businessDate===d).forEach(sheet=>{
+    sheet.attendance=Array.isArray(sheet.attendance)?sheet.attendance:[];
+    const idx=sheet.attendance.findIndex(x=>x&&((x.castId&&x.castId===c.id)||(!x.castId&&x.castName===c.name)));
+    if(attendanceLogHasValue(log)){
+      const row={castId:c.id,castName:c.name,log:deepCopy(log)};
+      if(idx>=0)sheet.attendance[idx]=row;else sheet.attendance.push(row);
+    }else if(idx>=0){
+      sheet.attendance.splice(idx,1);
+    }
+  });
+}
+function writeCastAttendanceLog(c,d,log,opt={}){
+  if(!c)return null;
+  c.logs=c.logs||{};
+  const prev=c.logs[d]||{};
+  const next={...prev,...deepCopy(log||{})};
+  next._updatedAt=opt.updatedAt||new Date().toISOString();
+  if(d===state.businessDate&&state.businessOpen)next._sessionStartAt=state.businessStartedAt||next._sessionStartAt||'';
+  if(attendanceLogHasValue(next)){delete next._zeroReset;delete next._attendanceCleared;}
+  delete next._fromBusinessSheet;delete next._businessSheetSavedAt;delete next._restoredFromBusinessSheet;
+  if(opt.manualClosingId){next.manualClosing=true;next._manualClosingId=opt.manualClosingId;}
+  else{delete next.manualClosing;delete next._manualClosingId;}
+  c.logs[d]=next;
+  syncBusinessSheetAttendanceForCast(c,d,next);
+  return next;
+}
+function mergeCastAttendanceLogs(localCasts,remoteCasts){
+  const localById=new Map((localCasts||[]).filter(Boolean).map(c=>[c.id,c]));
+  const localByName=new Map((localCasts||[]).filter(Boolean).map(c=>[c.name,c]));
+  return (remoteCasts||[]).map(rc=>{
+    if(!rc)return rc;
+    const lc=localById.get(rc.id)||localByName.get(rc.name);
+    if(!lc)return rc;
+    const ll=lc.logs||{},rl=rc.logs||{},dates=new Set([...Object.keys(ll),...Object.keys(rl)]),logs={};
+    dates.forEach(d=>{
+      const a=ll[d],b=rl[d];
+      if(!a){logs[d]=b;return;} if(!b){logs[d]=a;return;}
+      const av=attendanceLogHasValue(a),bv=attendanceLogHasValue(b),ac=attendanceLogExplicitlyCleared(a),bc=attendanceLogExplicitlyCleared(b);
+      const at=Number(Date.parse(a._updatedAt||0))||0,bt=Number(Date.parse(b._updatedAt||0))||0;
+      if(ac||bc){logs[d]=at>bt?a:b;return;}
+      if(av&&!bv){logs[d]=a;return;} if(bv&&!av){logs[d]=b;return;}
+      logs[d]=at>bt?a:b;
+    });
+    return {...rc,logs};
+  });
+}
+function repairAttendanceLinks(){
+  const casts=state.casts||[];
+  const byId=new Map(casts.map(c=>[c.id,c])),byName=new Map(casts.map(c=>[c.name,c]));
+  // 締め票で確定・修正された出退勤は最優先。従来データも casts.logs に戻して参照先を統一する。
+  const manualByKey=new Map();
+  (state.manualClosingSheets||[]).forEach(r=>{
+    if(!r||!r.businessDate||!(r.in||r.out))return;
+    const key=String(r.businessDate)+'|'+String(r.castId||r.castName||'');
+    const old=manualByKey.get(key);
+    if(!old||recordUpdatedMs(r)>=recordUpdatedMs(old))manualByKey.set(key,r);
+  });
+  manualByKey.forEach(r=>{
+    const c=byId.get(r.castId)||byName.get(r.castName);if(!c)return;
+    writeCastAttendanceLog(c,r.businessDate,{in:r.in||'',out:r.out||'',absent:false,status:''},{manualClosingId:r.id,updatedAt:r.updatedAt||r.createdAt||new Date().toISOString()});
+  });
+  // casts.logs が欠けている過去日は営業終了スナップショットから復旧する。
+  casts.forEach(c=>{
+    const dates=new Set((state.businessSheets||[]).filter(x=>x&&Array.isArray(x.attendance)&&x.attendance.some(a=>a&&((a.castId&&a.castId===c.id)||(!a.castId&&a.castName===c.name)))).map(x=>x.businessDate));
+    dates.forEach(d=>{
+      const cur=(c.logs||{})[d];if(attendanceLogHasValue(cur)||attendanceLogExplicitlyCleared(cur))return;
+      const archived=businessSheetAttendanceLog(c,d);if(!archived)return;
+      writeCastAttendanceLog(c,d,{...archived,_restoredFromBusinessSheet:true},{updatedAt:archived._updatedAt||archived._businessSheetSavedAt||new Date().toISOString()});
+    });
+  });
+}
 function snapshotBusinessDay(d=state.businessDate){
   ensureAbsentLogsForDay(d);
   let s=daySum(d);
@@ -1720,7 +1822,7 @@ function snapshotBusinessDay(d=state.businessDate){
     expenses:deepCopy((state.expenses||[]).filter(x=>x.businessDate===d)),
     cashFlows:deepCopy((state.cashFlows||[]).filter(x=>x.businessDate===d)),
     closings:deepCopy((state.closings||[]).filter(x=>x.businessDate===d)),
-    attendance:deepCopy((state.casts||[]).map(c=>({castId:c.id,castName:c.name,log:(c.logs||{})[d]||{}})).filter(x=>x.log.in||x.log.out||x.log.absent))
+    attendance:deepCopy((state.casts||[]).map(c=>({castId:c.id,castName:c.name,log:effectiveWorkLog(c,d)||{}})).filter(x=>attendanceLogHasValue(x.log)))
   };
   state.businessSheets=(state.businessSheets||[]).filter(x=>x.businessDate!==d);
   state.businessSheets.unshift(sheet);
@@ -1808,11 +1910,17 @@ function resetWorkingDataForBusinessStart(d){
   state.unpaids=(state.unpaids||[]).filter(x=>x.businessDate!==d);
   (state.casts||[]).forEach(c=>{
     c.logs=c.logs||{};
-    // 営業開始ボタンを押した営業日の出退勤表示は必ず 00:00 / 00:00 / 勤務時間0 に戻す。
-    // キャスト登録情報そのものは残す。
-    c.logs[d]={in:'00:00',out:'00:00',absent:false,status:'',_zeroReset:true,_sessionStartAt:state.businessStartedAt||'',_updatedAt:new Date().toISOString()};
+    // 同じ営業日を再開した場合は、既存ログ・締め票・営業終了スナップショットの出退勤を消さない。
+    const mr=effectiveManualClosingRow(c.id,d),direct=c.logs[d]||{},archived=businessSheetAttendanceLog(c,d);
+    const keep=(mr&&(mr.in||mr.out))?{in:mr.in||'',out:mr.out||'',absent:false,status:'',manualClosing:true,_manualClosingId:mr.id}:attendanceLogHasValue(direct)?direct:archived;
+    if(keep&&attendanceLogHasValue(keep)){
+      c.logs[d]={...deepCopy(keep),_zeroReset:false,_sessionStartAt:state.businessStartedAt||'',_updatedAt:keep._updatedAt||new Date().toISOString()};
+      c.status=(c.logs[d].in&&!c.logs[d].out&&!c.logs[d].absent)?'on':'off';
+    }else{
+      c.logs[d]={in:'00:00',out:'00:00',absent:false,status:'',_zeroReset:true,_sessionStartAt:state.businessStartedAt||'',_updatedAt:new Date().toISOString()};
+      c.status='off';
+    }
     delete c.in; delete c.out; delete c.clockIn; delete c.clockOut;
-    c.status='off';
   });
 }
 function clearBusinessStartDisplayAreas(){
@@ -2644,7 +2752,7 @@ function syncDerivedAfterReceiptEdit(d){
     sheet.sales=deepCopy((state.sales||[]).filter(x=>x.businessDate===d));
     sheet.expenses=deepCopy((state.expenses||[]).filter(x=>x.businessDate===d));
     sheet.cashFlows=deepCopy((state.cashFlows||[]).filter(x=>x.businessDate===d));
-    sheet.attendance=deepCopy((state.casts||[]).map(c=>({castId:c.id,castName:c.name,log:(c.logs||{})[d]||{}})).filter(x=>x.log.in||x.log.out));
+    sheet.attendance=deepCopy((state.casts||[]).map(c=>({castId:c.id,castName:c.name,log:effectiveWorkLog(c,d)||{}})).filter(x=>attendanceLogHasValue(x.log)));
     sheet.editedAt=new Date().toISOString();
   });
   (state.closings||[]).filter(x=>x.businessDate===d).forEach(close=>{
@@ -3188,7 +3296,8 @@ function isStaleCurrentSessionLog(l,d=state.businessDate){
   if(state.manageResetAt && l._updatedAt && l._updatedAt < state.manageResetAt) return true;
   return false;
 }
-function getLog(c,d=state.businessDate){c.logs=c.logs||{};let l=c.logs[d];return isStaleCurrentSessionLog(l,d)?{in:'00:00',out:'00:00',absent:false,status:'',_zeroReset:true}:(l||{in:'',out:''})}function setLog(c,d,l){c.logs=c.logs||{};l._updatedAt=new Date().toISOString();l._sessionStartAt=state.businessStartedAt||'';c.logs[d]=l}
+function getLog(c,d=state.businessDate){c.logs=c.logs||{};let l=c.logs[d];return isStaleCurrentSessionLog(l,d)?{in:'00:00',out:'00:00',absent:false,status:'',_zeroReset:true}:(l||{in:'',out:''})}
+function setLog(c,d,l){return writeCastAttendanceLog(c,d,l,{updatedAt:new Date().toISOString()})}
 function castManualTime(castId,field,current,maxHour){
   let raw=prompt('時刻を入力してください（例 23:45 / 2345 / 23時45分 / 2430）', current||'00:00');
   if(raw===null)return;
@@ -3211,19 +3320,19 @@ function recoverCastRegistryIfMissing(){
     }
   }
 }
-function renderCasts(){recoverCastRegistryIfMissing();castCards.innerHTML=activeCasts().map(c=>{let l=getLog(c);let hasIn=!!l.in&&l.in!=='休み',hasOut=!!l.out&&l.out!=='休み';return `<div class="card"><div class="row"><h3>${c.name}</h3><span class="badge ${c.status==='on'?'':'busy'}">${c.status==='on'?'出勤中':'退勤'}</span></div><div class="grid2"><div><label>出勤</label>${castTimePickerHtml(c.id,'in',l.in)}</div><div><label>退勤</label>${castTimePickerHtml(c.id,'out',l.out)}</div></div><div class="info" style="margin:8px 0"><b>勤務時間</b><span>${workDur(c,state.businessDate)}</span></div><div class="grid2"><button class="btn ok" onclick="clockIn('${c.id}')">出勤</button><button class="btn out" onclick="clockOut('${c.id}')">退勤</button></div><div class="grid2" style="margin-top:8px"><button class="btn bad small" ${hasIn?'':'disabled'} onclick="cancelClockIn('${c.id}')">出勤取消</button><button class="btn warn small" ${hasOut?'':'disabled'} onclick="cancelClockOut('${c.id}')">退勤取消</button></div></div>`}).join('')||'<div class="card">下のキャスト登録・編集から追加／再表示できます</div>'}
-function openClockManual(id,mode){let c=state.casts.find(x=>x.id===id);if(!c)return;let l=getLog(c);clockCastId.value=id;clockMode.value=mode;clockTitle.textContent=c.name+' '+(mode==='in'?'出勤時間入力':'退勤時間入力');clockTimeLabel.textContent=mode==='in'?'出勤時間':'退勤時間';clockDateInput.value=state.businessDate;let maxHour=mode==='out'?26:25;setTimePickerMax('clockTimeInput',maxHour);let cur=mode==='out'?businessTime10(now,state.businessDate,'ceil',26):businessTime10(now,state.businessDate,'ceil',26);setTimeInput('clockTimeInput',mode==='in'?(normalizeTimeValue(l.in||'','exact',maxHour)||cur):(normalizeTimeValue(l.out||'','exact',maxHour)||cur),maxHour);openModal('clockModal')}
-function confirmClockManual(){let id=clockCastId.value,mode=clockMode.value,c=state.casts.find(x=>x.id===id);if(!c)return;let d=clockDateInput.value||state.businessDate,l=getLog(c,d),maxHour=mode==='out'?26:25,v=normalizeTimeValue(clockTimeInput.value||(mode==='out'?businessTime10(now,state.businessDate,'ceil',26):businessTime10(now,state.businessDate,'ceil',26)),'exact',maxHour);if(mode==='in'){l.in=v;l.out='';l.absent=false;delete l.status;c.status='on'}else{if(!l.in||l.in==='休み')l.in=v;l.out=v;l.absent=false;delete l.status;c.status='off'}setLog(c,d,l);closeModal('clockModal');render()}
-function clockIn(id){openClockManual(id,'in')}function clockOut(id){openClockManual(id,'out')}function clockOutAll(){state.casts.forEach(c=>{if(c.status==='on'){let l=getLog(c);if(!l.in||l.in==='休み')l.in=businessTime10(now,state.businessDate,'ceil',26);l.out=businessTime10(now,state.businessDate,'ceil',26);l.absent=false;delete l.status;c.status='off';setLog(c,state.businessDate,l)}});render()}function editLog(id,f,v){let c=state.casts.find(x=>x.id===id),l=getLog(c),maxHour=f==='out'?26:25;l[f]=normalizeTimeValue(v,'exact',maxHour);l.absent=false;delete l.status;setLog(c,state.businessDate,l);render()}
-function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.out||l.out==='休み')return alert('退勤記録がありません');if(!confirm(`${c.name} の退勤を取り消して出勤中に戻しますか？`))return;l.out='';l.absent=false;delete l.status;c.status=l.in&&l.in!=='休み'?'on':'off';setLog(c,d,l);render()}
-function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=getLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;if(c.logs)c.logs[d]={in:'',out:'',absent:false};c.status='off';render()}
+function renderCasts(){recoverCastRegistryIfMissing();castCards.innerHTML=activeCasts().map(c=>{let l=operationalWorkLog(c,state.businessDate);let hasIn=!!l.in&&l.in!=='休み',hasOut=!!l.out&&l.out!=='休み';return `<div class="card"><div class="row"><h3>${c.name}</h3><span class="badge ${c.status==='on'?'':'busy'}">${c.status==='on'?'出勤中':'退勤'}</span></div><div class="grid2"><div><label>出勤</label>${castTimePickerHtml(c.id,'in',l.in)}</div><div><label>退勤</label>${castTimePickerHtml(c.id,'out',l.out)}</div></div><div class="info" style="margin:8px 0"><b>勤務時間</b><span>${workDur(c,state.businessDate)}</span></div><div class="grid2"><button class="btn ok" onclick="clockIn('${c.id}')">出勤</button><button class="btn out" onclick="clockOut('${c.id}')">退勤</button></div><div class="grid2" style="margin-top:8px"><button class="btn bad small" ${hasIn?'':'disabled'} onclick="cancelClockIn('${c.id}')">出勤取消</button><button class="btn warn small" ${hasOut?'':'disabled'} onclick="cancelClockOut('${c.id}')">退勤取消</button></div></div>`}).join('')||'<div class="card">下のキャスト登録・編集から追加／再表示できます</div>'}
+function openClockManual(id,mode){let c=state.casts.find(x=>x.id===id);if(!c)return;let l=operationalWorkLog(c,state.businessDate);clockCastId.value=id;clockMode.value=mode;clockTitle.textContent=c.name+' '+(mode==='in'?'出勤時間入力':'退勤時間入力');clockTimeLabel.textContent=mode==='in'?'出勤時間':'退勤時間';clockDateInput.value=state.businessDate;let maxHour=mode==='out'?26:25;setTimePickerMax('clockTimeInput',maxHour);let cur=mode==='out'?businessTime10(now,state.businessDate,'ceil',26):businessTime10(now,state.businessDate,'ceil',26);setTimeInput('clockTimeInput',mode==='in'?(normalizeTimeValue(l.in||'','exact',maxHour)||cur):(normalizeTimeValue(l.out||'','exact',maxHour)||cur),maxHour);openModal('clockModal')}
+function confirmClockManual(){let id=clockCastId.value,mode=clockMode.value,c=state.casts.find(x=>x.id===id);if(!c)return;let d=clockDateInput.value||state.businessDate,l={...operationalWorkLog(c,d)},maxHour=mode==='out'?26:25,v=normalizeTimeValue(clockTimeInput.value||(mode==='out'?businessTime10(now,state.businessDate,'ceil',26):businessTime10(now,state.businessDate,'ceil',26)),'exact',maxHour);if(mode==='in'){l.in=v;l.out='';l.absent=false;delete l.status;c.status='on'}else{if(!l.in||l.in==='休み')l.in=v;l.out=v;l.absent=false;delete l.status;c.status='off'}setLog(c,d,l);if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);closeModal('clockModal');render()}
+function clockIn(id){openClockManual(id,'in')}function clockOut(id){openClockManual(id,'out')}function clockOutAll(){state.casts.forEach(c=>{if(c.status==='on'){let l={...operationalWorkLog(c,state.businessDate)};if(!l.in||l.in==='休み')l.in=businessTime10(now,state.businessDate,'ceil',26);l.out=businessTime10(now,state.businessDate,'ceil',26);l.absent=false;delete l.status;c.status='off';setLog(c,state.businessDate,l)}});if((state.businessSheets||[]).some(x=>x.businessDate===state.businessDate))syncDerivedAfterReceiptEdit(state.businessDate);render()}function editLog(id,f,v){let c=state.casts.find(x=>x.id===id),l={...operationalWorkLog(c,state.businessDate)},maxHour=f==='out'?26:25;l[f]=normalizeTimeValue(v,'exact',maxHour);l.absent=false;delete l.status;setLog(c,state.businessDate,l);if((state.businessSheets||[]).some(x=>x.businessDate===state.businessDate))syncDerivedAfterReceiptEdit(state.businessDate);render()}
+function cancelClockOut(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l={...operationalWorkLog(c,d)};if(!l.out||l.out==='休み')return alert('退勤記録がありません');if(!confirm(`${c.name} の退勤を取り消して出勤中に戻しますか？`))return;l.out='';l.absent=false;delete l.status;c.status=l.in&&l.in!=='休み'?'on':'off';setLog(c,d,l);if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);render()}
+function cancelClockIn(id){let c=state.casts.find(x=>x.id===id);if(!c)return;let d=state.businessDate,l=operationalWorkLog(c,d);if(!l.in||l.in==='休み')return alert('出勤記録がありません');if(!confirm(`${c.name} の出勤記録を取り消しますか？退勤時間も削除され、週間表・締め票は再計算されます。`))return;writeCastAttendanceLog(c,d,{in:'',out:'',absent:false,status:'',_attendanceCleared:true},{updatedAt:new Date().toISOString()});c.status='off';if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);render()}
 function effectiveManualClosingRow(castId,d){
   return (state.manualClosingSheets||[]).filter(x=>x.businessDate===d&&x.castId===castId).sort((a,b)=>new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0))[0]||null;
 }
 function effectiveWorkLog(c,d){
   const r=effectiveManualClosingRow(c.id,d);
   if(r&&(r.in||r.out))return {in:r.in||'',out:r.out||'',absent:false,manualClosing:true};
-  return getLog(c,d);
+  return operationalWorkLog(c,d);
 }
 function workMin(c,d){let l=effectiveWorkLog(c,d);if(isAbsentLog(l)||!l.in||l.in==='休み')return 0;let s=parseDT(d,l.in),hasOut=!!l.out&&l.out!=='休み',e=parseDT(d,hasOut?l.out:time(now));if(e<s){if(hasOut){e.setDate(e.getDate()+1)}else{return 0}}return round10(Math.max(0,Math.floor((e-s)/60000)))}
 function workDur(c,d){return dur(workMin(c,d))}
@@ -3436,7 +3545,7 @@ function showBusinessHistory(d){
   let expenses=(state.expenses||[]).filter(x=>x.businessDate===d);
   let cashFlows=(state.cashFlows||[]).filter(x=>x.businessDate===d);
   let closings=(state.closings||[]).filter(x=>x.businessDate===d);
-  let attendance=(state.casts||[]).map(c=>{let l=getLog(c,d);return {cast:c,log:l}}).filter(x=>x.log.in||x.log.out);
+  let attendance=(state.casts||[]).map(c=>{let l=effectiveWorkLog(c,d);return {cast:c,log:l}}).filter(x=>attendanceLogHasValue(x.log)&&!isAbsentLog(x.log));
   let unpaid=sales.filter(x=>x.table&&x.table.payment==='unpaid');
   let deletedOrders=(state.orderDeleteLogs||[]).filter(x=>x.businessDate===d);
   historyDetail.innerHTML=`<div class="card" style="background:#f8fafc"><div class="row"><h3>営業日詳細 ${d}</h3><button class="btn out small" onclick="window.print()">印刷/PDF</button></div><div class="summary" style="margin-top:10px">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('支出',s.expenses)}${cardStat('純利益',s.profit)}<div class="card stat"><div class="label">利益率</div><div class="val">${pct(s.sales?s.profit/s.sales*100:0)}</div></div></div><div class="section">会計履歴</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th>人数</th><th>支払</th><th class="right">小計</th><th class="right">合計</th><th>修正</th></tr></thead><tbody>${sales.map(x=>`<tr><td>${time(new Date(x.checkoutAt))}</td><td>${x.table.id}</td><td>${x.table.guests}</td><td>${x.table.payment==='card'?'カード':x.table.payment==='unpaid'?'未収':'現金'}</td><td class="right">${yen(x.subtotal)}</td><td class="right">${yen(x.total)}</td><td>${isAdmin?`<button class="btn blue small" onclick="editPastReceipt('${x.id}')">修正</button>`:'-'}</td></tr>`).join('')||'<tr><td colspan="7" class="muted">会計なし</td></tr>'}</tbody></table></div><div class="section">出退勤</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th class="right">時間給</th><th class="right">バック</th></tr></thead><tbody>${attendance.map(x=>`<tr><td>${x.cast.name}</td><td>${x.log.in||'-'}</td><td>${x.log.out||'-'}</td><td>${workDur(x.cast,d)}</td><td class="right">${yen(timePay(x.cast,d))}</td><td class="right">${yen(stats(x.cast.id,d).back)}</td></tr>`).join('')||'<tr><td colspan="6" class="muted">出退勤なし</td></tr>'}</tbody></table></div><div class="section">未収</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th class="right">金額</th></tr></thead><tbody>${unpaid.map(x=>`<tr><td>${time(new Date(x.checkoutAt))}</td><td>${x.table.id}</td><td class="right">${yen(x.total)}</td></tr>`).join('')||'<tr><td colspan="3" class="muted">未収なし</td></tr>'}</tbody></table></div><div class="section">支出・入出金</div><div class="scroll"><table><thead><tr><th>区分</th><th>内容</th><th class="right">金額</th></tr></thead><tbody>${expenses.map(x=>`<tr><td>支出</td><td>${x.name}</td><td class="right">${yen(x.amount)}</td></tr>`).join('')}${cashFlows.map(x=>`<tr><td>${x.type==='in'?'入金':'出金'}</td><td>${x.name}</td><td class="right">${yen(x.amount)}</td></tr>`).join('')||''}</tbody></table></div><div class="section">注文削除ログ</div><div class="scroll"><table><thead><tr><th>時刻</th><th>卓</th><th>商品</th><th class="right">単価</th><th class="right">数量</th></tr></thead><tbody>${deletedOrders.map(x=>`<tr><td>${new Date(x.at).toLocaleString()}</td><td>${x.tableId}</td><td>${x.name}</td><td class="right">${yen(x.price)}</td><td class="right">${x.qty}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">削除ログなし</td></tr>'}</tbody></table></div><div class="section">営業終了保存データ</div><div class="scroll"><table><thead><tr><th>保存時刻</th><th>稼働卓保存</th><th class="right">保存時売上</th><th class="right">保存時純利益</th></tr></thead><tbody>${((state.businessSheets||[]).filter(x=>x.businessDate===d)).map(x=>`<tr><td>${new Date(x.savedAt).toLocaleString()}</td><td>${(x.tables||[]).filter(t=>t.status==='busy').map(t=>t.id).join(', ')||'-'}</td><td class="right">${yen(x.summary?.sales||0)}</td><td class="right">${yen(x.summary?.profit||0)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">営業終了保存なし</td></tr>'}</tbody></table></div><div class="section">レジ締め履歴</div><div class="scroll"><table><thead><tr><th>保存時刻</th><th class="right">売上</th><th class="right">純利益</th><th class="right">入金</th><th class="right">出金</th></tr></thead><tbody>${closings.map(x=>`<tr><td>${new Date(x.closedAt).toLocaleString()}</td><td class="right">${yen(x.sales)}</td><td class="right">${yen(x.profit)}</td><td class="right">${yen(x.cashIn)}</td><td class="right">${yen(x.cashOut)}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">レジ締め保存なし</td></tr>'}</tbody></table></div></div>`;
@@ -3607,11 +3716,11 @@ function makeClosing(){
   let totals={db:0,sb:0,jounai:0,dohan:0,after:0,nom:0,wheel:0,champ:0};
   const closingCasts=(state.casts||[]).filter(c=>{
     if(isCastHidden(c)) return false;
-    const l=getLog(c,d)||{};
+    const l=effectiveWorkLog(c,d)||{};
     const inTime=String(l.in||'').trim();
     return !!inTime && inTime!=='休み' && !l.absent && l.status!=='休み' && l.status!=='欠勤' && workMin(c,d)>0;
   });
-  let rows=closingCasts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=getLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
+  let rows=closingCasts.map(c=>{let st=stats(c.id,d),tp=timePay(c,d),l=effectiveWorkLog(c,d);totals.db+=st.dbBack;totals.sb+=st.sbBack;totals.jounai+=st.jounaiBack;totals.dohan+=st.dohanBack;totals.after+=st.afterBack;totals.nom+=st.nomSet+st.nomSub;totals.wheel+=st.wheelBack;totals.champ+=st.champBack;return `<tr><td>${c.name}</td><td>${l.in||'-'}</td><td>${l.out||'-'}</td><td>${workDur(c,d)}</td><td class="right">${yen(wage(c,d))}</td><td class="right">${yen(tp)}</td><td>${st.dbQty}杯 / ${yen(st.dbBack)}</td><td>${st.sbQty}杯 / ${yen(st.sbBack)}</td><td>${st.jounai}本 / ${yen(st.jounaiBack)}</td><td>${st.dohan}本 / ${yen(st.dohanBack)}</td><td>${st.after}本 / ${yen(st.afterBack)}</td><td class="right">${yen(st.nomSet)}</td><td class="right">${yen(st.nomSub)}</td><td>${st.wheelCount} / ${yen(st.wheelBack)}</td><td>${st.champCount} / ${yen(st.champBack)}</td><td class="right">${yen(st.back)}</td><td class="right">${yen(st.back+tp)}</td></tr>`}).join('')||'<tr><td colspan="17" class="muted">出勤キャストなし</td></tr>';
   const cardRows=cd.rows.map(x=>`<tr><td>${x.table}</td><td class="right">${yen(x.base)}</td><td class="right">${yen(x.fee)}</td><td class="right">${yen(x.charge)}</td></tr>`).join('')||'<tr><td colspan="4" class="muted">カード会計なし</td></tr>';
   closingArea.innerHTML=`<div class="card"><div class="row"><h2>締め票 ${d}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveClosingA4(this)">スクショ保存（横A4）</button></div></div><div class="grid4"><div class="info"><b>総売上</b><span>${yen(s.sales)}</span></div><div class="info"><b>現金残額（仕入差引）</b><span>${yen(cashAfterExpenses)}</span></div><div class="info"><b>カード売上</b><span>${yen(bd.card)}</span></div><div class="info"><b>未収</b><span>${yen(bd.unpaid)}</span></div></div><div class="section">カード会計（売上別枠）</div><div class="scroll"><table><thead><tr><th>卓</th><th class="right">売上分</th><th class="right">カード加算</th><th class="right">カード請求額</th></tr></thead><tbody>${cardRows}<tr><th>合計</th><th class="right">${yen(cd.base)}</th><th class="right">${yen(cd.fee)}</th><th class="right">${yen(cd.total)}</th></tr></tbody></table></div><div class="section">キャスト別給与</div><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>時給</th><th>時間給</th><th>DB</th><th>SB</th><th>場内</th><th>同伴</th><th>アフター</th><th>指名(セット)</th><th>指名(小計)</th><th>テキカンB</th><th>シャンパンB</th><th>バック合計</th><th>給与</th></tr></thead><tbody>${rows}</tbody></table></div><div class="section">バック項目別合計</div><div class="summary">${cardStat('DB',totals.db)}${cardStat('SB',totals.sb)}${cardStat('場内',totals.jounai)}${cardStat('同伴',totals.dohan)}${cardStat('アフター',totals.after)}${cardStat('指名',totals.nom)}${cardStat('テキカン',totals.wheel)}${cardStat('シャンパン',totals.champ)}${cardStat('バック総額',s.back)}</div><div class="section">最終集計</div><div class="summary">${cardStat('売上',s.sales)}${cardStat('人件費',s.labor)}${cardStat('バック',s.back)}${cardStat('給与合計',s.payroll)}${cardStat('仕入れ支出',s.expenses)}${cardStat('純利益',s.profit)}${cardStat('カード加算',cd.fee)}</div></div>`}
 
@@ -3671,7 +3780,8 @@ function payrollSummaryCards(c,totals,label='週間',base=state.businessDate) {
 }
 
 function weeklyCastHasAttendance(c,wds){
-  return (wds||[]).some(d=>{let l=getLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;});
+  // 週間表と同じく、通常の出退勤ログより締め票入力を優先して判定する。
+  return (wds||[]).some(d=>{let l=effectiveWorkLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;});
 }
 function weeklyOverviewPayForCast(c,base){
   let wds=weekDates(base),totals=initWeekTotals();
@@ -3682,7 +3792,7 @@ function weeklyOverviewPayForCast(c,base){
   let rate=Number(c.deductionRate||0);
   let deduction=gross*rate/100;
   let net=gross-deduction;
-  let days=wds.filter(d=>{let l=getLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;}).length;
+  let days=wds.filter(d=>{let l=effectiveWorkLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;}).length;
   return {wds,totals,bonus,gross,rate,deduction,net,days};
 }
 function renderWeeklyOverview(){
@@ -4436,7 +4546,7 @@ function operationalStatsForCast(cid,d){
   try{state.manualClosingSheets=[];return stats(cid,d)}finally{state.manualClosingSheets=old}
 }
 function operationalCastSnapshot(c,d){
-  const st=operationalStatsForCast(c.id,d),l=getLog(c,d)||{};
+  const st=operationalStatsForCast(c.id,d),l=operationalWorkLog(c,d)||{};
   return {in:l.in||'',out:l.out||'',dbQty:st.dbQty||0,dbBack:st.dbBack||0,sbQty:st.sbQty||0,sbBack:st.sbBack||0,jounai:st.jounai||0,jounaiBack:st.jounaiBack||0,nom:st.nom||0,nomSet:st.nomSet||0,nomSub:st.nomSub||0,dohan:st.dohan||0,dohanBack:st.dohanBack||0,after:st.after||0,afterBack:st.afterBack||0,wheelCount:st.wheelCount||0,wheelBack:st.wheelBack||0,champCount:st.champCount||0,champBack:st.champBack||0,otherBack:0};
 }
 function manualClosingFormDay(d){
@@ -4576,7 +4686,13 @@ function saveManualClosingSheet(){
   state.manualClosingDeleted=state.manualClosingDeleted||{};
   delete state.manualClosingDeleted[rec.id];
   if(existing) state.manualClosingSheets=state.manualClosingSheets.map(x=>x.id===existing.id?rec:x); else state.manualClosingSheets.push(rec);
-  if((inTime||outTime)&&!rec.linkedBase){cast.logs=cast.logs||{};cast.logs[d]={...(cast.logs[d]||{}),in:inTime||cast.logs[d]?.in||'',out:outTime||cast.logs[d]?.out||'',manualClosing:true};}
+  if(inTime||outTime){
+    writeCastAttendanceLog(cast,d,{in:inTime,out:outTime,absent:false,status:''},{manualClosingId:rec.id,updatedAt:rec.updatedAt});
+  }else if(existing&&((cast.logs||{})[d]?._manualClosingId===rec.id)){
+    const base=rec.linkedBase||{};
+    writeCastAttendanceLog(cast,d,{in:base.in||'',out:base.out||'',absent:false,status:''},{updatedAt:new Date().toISOString()});
+  }
+  if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);
   save();
   render();
   selectTitle.textContent='締め票入力';
@@ -4613,6 +4729,12 @@ function deleteManualClosingSheet(id){
   state.manualClosingDeleted=state.manualClosingDeleted||{};
   state.manualClosingDeleted[id]=new Date().toISOString();
   state.manualClosingSheets=(state.manualClosingSheets||[]).filter(x=>x.id!==id);
+  const c=(state.casts||[]).find(x=>x.id===rec.castId)||((state.casts||[]).find(x=>x.name===rec.castName));
+  if(c&&((c.logs||{})[rec.businessDate]?._manualClosingId===rec.id)){
+    const base=rec.linkedBase||{};
+    writeCastAttendanceLog(c,rec.businessDate,{in:base.in||'',out:base.out||'',absent:false,status:''},{updatedAt:new Date().toISOString()});
+  }
+  if((state.businessSheets||[]).some(x=>x.businessDate===rec.businessDate))syncDerivedAfterReceiptEdit(rec.businessDate);
   save();render();renderManualClosingList(rec.businessDate);
 }
 
@@ -4684,7 +4806,7 @@ function exportSheetCSV(){
   rows.push([]);
   rows.push(['キャスト','出勤','退勤','勤務時間','時給','時間給','DB杯数','DBバック','SB杯数','SBバック','場内本数','場内バック','同伴','アフター','指名セット','指名小計','テキカンB','シャンパンB','バック合計','給与']);
   state.casts.forEach(c=>{
-    let st=stats(c.id,d), l=getLog(c,d), tp=timePay(c,d);
+    let st=stats(c.id,d), l=effectiveWorkLog(c,d), tp=timePay(c,d);
     rows.push([c.name,l.in||0,l.out||0,workDur(c,d),Math.round(wage(c,d)),Math.round(tp),st.dbQty,Math.round(st.dbBack),st.sbQty,Math.round(st.sbBack),st.jounai,Math.round(st.jounaiBack),st.dohan,st.after,Math.round(st.nomSet),Math.round(st.nomSub),Math.round(st.wheelBack),Math.round(st.champBack),Math.round(st.back),Math.round(st.back+tp)]);
   });
   rows.push([]);
@@ -4792,10 +4914,14 @@ function runPosSelfTests(){
   console.assert(typeof updateTableSetPriceInline==='function','卓画面一人分セット料金の直接修正関数が存在する');
   console.assert(document.documentElement.innerHTML.includes('一人分セット料金'),'卓画面に一人分セット料金入力欄が存在する');
   console.assert(typeof castTimePickerHtml==='function','キャスト出退勤の表示も10分刻みセレクト式');
+  console.assert(typeof operationalWorkLog==='function'&&typeof repairAttendanceLinks==='function','出勤情報の営業・締め票連携関数が存在する');
+  console.assert(attendanceLogHasValue({in:'00:00',out:'00:00'})===false&&attendanceLogHasValue({in:'00:00',out:'01:00'})===true,'00:00初期値と実勤務を正しく区別する');
+  const attendanceMergeTest=mergeCastAttendanceLogs([{id:'__att__',name:'__att__',logs:{'2099-01-01':{in:'20:00',out:'25:00',_updatedAt:'2099-01-02T02:00:00Z'}}}],[{id:'__att__',name:'__att__',logs:{'2099-01-01':{in:'21:00',out:'25:00',_updatedAt:'2099-01-02T01:00:00Z'}}}]);
+  console.assert(attendanceMergeTest[0].logs['2099-01-01'].in==='20:00','Firebase同期は新しい出勤ログを優先する');
 }
 runPosSelfTests();
 if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('./sw.js').catch(()=>{});});}
-setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();render();setTimeout(startAutoSync,800);
+setInterval(()=>{now=new Date();updateReceiptGrantStatus();render()},30000);applyAppLock();initAllTimePickers();repairAttendanceLinks();render();setTimeout(startAutoSync,800);
 
 
 console.assert(typeof openClosingSheetInput==='function','締め票入力画面が存在する');
