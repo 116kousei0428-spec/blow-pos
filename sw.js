@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v13-closing-attendance-integrated-sales61';
+const CACHE_NAME = 'blow-amami-pos-mobile-v14-payroll-attendance-consistency62';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
