@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Blow2nd POS v2.0 beta59 attendance recovery</title>
+<title>Blow2nd POS v2.0 beta60 closing attendance list</title>
 <meta name="theme-color" content="#111827">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1175,7 +1175,7 @@ function cloudStatePayload(cfg){
   if(!Array.isArray(cleanState.tables)||!cleanState.tables.length)throw new Error('卓データが空のため保存を中止しました');
   return {
     app:'Blow2nd_POS',
-    version:'v2.0_beta59_attendance_recovery',
+    version:'v2.0_beta60_closing_attendance_list',
     backupVersion:1,
     updatedAt:new Date().toISOString(),
     device:cfg.device||'unknown-device',
@@ -4016,7 +4016,7 @@ async function starterReset(){
     const revision=Date.now();
     const signature=simpleHash(JSON.stringify(cleanState));
     const payload={
-      app:'Blow2nd_POS',version:'v2.0_beta59_attendance_recovery',backupVersion:1,
+      app:'Blow2nd_POS',version:'v2.0_beta60_closing_attendance_list',backupVersion:1,
       updatedAt:new Date().toISOString(),device:cfg.device||'unknown-device',
       businessDate:cleanState.businessDate||'',
       counts:{casts:(cleanState.casts||[]).length,sales:0,tables:(cleanState.tables||[]).length},
@@ -4705,7 +4705,7 @@ function manualClosingFormDay(d){
 function loadManualClosingDate(d){
   const day=manualClosingFormDay(d),set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v??''};
   set('manualTotalSales',day.totalSales);set('manualCashSales',day.cashSales);set('manualCardSales',day.cardSales);set('manualUnpaidSales',day.unpaidSales);set('manualReceiptExpense',day.receiptExpense);set('manualDayMemo',day.memo);
-  resetManualCastForm();loadOperationalCastIntoForm();updateManualProfitPreview();renderManualClosingList(d);
+  resetManualCastForm();loadOperationalCastIntoForm();updateManualProfitPreview();renderManualAttendanceList(d);renderManualClosingList(d);
 }
 function manualAutoHourlyFromForm(c){
   const bs=castBackSettings(c||{}),base=Number(bs.hourly||2500);
@@ -4761,9 +4761,9 @@ function openClosingSheetInput(){
     <div><label>その他バック</label><input id="manualOtherBack" type="number" min="0" value="0"></div>
     <div><label>メモ</label><input id="manualMemo" placeholder="締め票から入力"></div>
   </div>
-  <div class="summary" id="manualProfitPreview" style="margin-top:12px"></div><div class="row" style="margin-top:12px"><button class="btn ok" id="manualClosingSaveButton" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" id="manualClosingCancelEdit" style="display:none" onclick="cancelManualClosingEdit()">修正をやめる</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
+  <div class="summary" id="manualProfitPreview" style="margin-top:12px"></div><div class="row" style="margin-top:12px"><button class="btn ok" id="manualClosingSaveButton" onclick="saveManualClosingSheet()">締め票入力を保存</button><button class="btn out" id="manualClosingCancelEdit" style="display:none" onclick="cancelManualClosingEdit()">修正をやめる</button><button class="btn out" onclick="renderManualClosingList(manualCloseDate.value)">この日の入力一覧</button></div><div id="manualAttendanceList" style="margin-top:14px"></div><div id="manualClosingList" style="margin-top:12px"></div></div>`;
   openModal('selectModal');
-  setTimeout(()=>{loadOperationalCastIntoForm();syncManualHourlyAuto();updateManualBackPreview();updateManualProfitPreview();renderManualClosingList(d)},20);
+  setTimeout(()=>{loadOperationalCastIntoForm();syncManualHourlyAuto();updateManualBackPreview();updateManualProfitPreview();renderManualAttendanceList(d);renderManualClosingList(d)},20);
 }
 function numFrom(id){return Number(document.getElementById(id)?.value||0)||0;}
 
@@ -4792,8 +4792,56 @@ function updateManualProfitPreview(){
   const total=numFrom('manualTotalSales')||numFrom('manualCashSales')+numFrom('manualCardSales')+numFrom('manualUnpaidSales');
   const receipt=numFrom('manualReceiptExpense');
   const pay=manualPayrollForDate(d);
-  const attendanceCount=(state.casts||[]).filter(c=>{const l=effectiveWorkLog(c,d)||{};return !isAbsentLog(l)&&!!String(l.in||'').trim()&&workMin(c,d)>0;}).length;
+  const attendanceCount=manualAttendanceRowsForDate(d).length;
   box.innerHTML=cardStatCount('出勤キャスト',attendanceCount,'人')+cardStat('売上',total)+cardStat('キャスト給与',pay.total)+cardStat('領収書',receipt)+cardStat('純利益',total-pay.total-receipt);
+}
+function manualAttendanceRowsForDate(d){
+  return (state.casts||[]).map(c=>({c,l:effectiveWorkLog(c,d)||{}})).filter(x=>{
+    const l=x.l||{},inv=String(l.in||'').trim(),outv=String(l.out||'').trim();
+    if(attendanceLogExplicitlyCleared(l)||isAbsentLog(l))return false;
+    if((!inv||inv==='00:00')&&(!outv||outv==='00:00'))return false;
+    return !!inv;
+  }).sort((a,b)=>{
+    const mins=v=>{const p=String(v||'').split(':').map(Number);return Number.isFinite(p[0])&&Number.isFinite(p[1])?p[0]*60+p[1]:9999};
+    return mins(a.l.in)-mins(b.l.in)||String(a.c.name||'').localeCompare(String(b.c.name||''));
+  });
+}
+function renderManualAttendanceList(d=state.businessDate){
+  const box=document.getElementById('manualAttendanceList');if(!box)return;
+  const items=manualAttendanceRowsForDate(d);
+  const rows=items.map(({c,l})=>`<tr><td><b>${esc(c.name)}</b></td><td><input id="manualAttIn_${c.id}" value="${esc(l.in||'')}" placeholder="20:00" style="width:88px;min-width:78px"></td><td><input id="manualAttOut_${c.id}" value="${esc(l.out||'')}" placeholder="25:00" style="width:88px;min-width:78px"></td><td>${workDur(c,d)||'-'}</td><td><button class="btn blue small" onclick="saveManualAttendanceEdit('${c.id}','${d}')">更新</button> <button class="btn bad small" onclick="deleteManualAttendanceEdit('${c.id}','${d}')">削除</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">この日の出勤キャストはいません</td></tr>';
+  box.innerHTML=`<div class="section">出勤キャスト（${items.length}人）</div><p class="muted" style="margin:6px 0 8px">営業側の出退勤をそのまま表示しています。ここで修正・削除すると週間表と給与にも反映されます。</p><div class="scroll"><table><thead><tr><th>キャスト</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function syncManualClosingAttendanceFields(c,d,inTime,outTime,cleared=false,updatedAt=''){
+  const r=effectiveManualClosingRow(c.id,d);if(!r)return;
+  r.in=cleared?'':(inTime||'');r.out=cleared?'':(outTime||'');r.updatedAt=updatedAt||new Date().toISOString();
+  canonicalizeHistoricalCastRef(r,c);
+}
+function saveManualAttendanceEdit(castId,d){
+  const c=(state.casts||[]).find(x=>x.id===castId);if(!c)return;
+  const rawIn=document.getElementById(`manualAttIn_${castId}`)?.value||'';
+  const rawOut=document.getElementById(`manualAttOut_${castId}`)?.value||'';
+  const inTime=rawIn?normalizeTimeValue(rawIn,'exact',25):'';
+  const outTime=rawOut?normalizeTimeValue(rawOut,'exact',26):'';
+  if(!inTime){alert('出勤時間を入力してください');return;}
+  if(rawOut&&!outTime){alert('退勤時間の形式が違います');return;}
+  const updatedAt=new Date().toISOString();
+  syncManualClosingAttendanceFields(c,d,inTime,outTime,false,updatedAt);
+  const mr=effectiveManualClosingRow(c.id,d);
+  writeCastAttendanceLog(c,d,{in:inTime,out:outTime,absent:false,status:''},{manualClosingId:mr?.id,updatedAt});
+  if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);
+  save();updateManualProfitPreview();renderManualAttendanceList(d);renderManualClosingList(d);
+  const selected=document.getElementById('manualCloseCast');if(selected&&selected.value===castId&&!manualClosingEditId)loadOperationalCastIntoForm();
+}
+function deleteManualAttendanceEdit(castId,d){
+  const c=(state.casts||[]).find(x=>x.id===castId);if(!c)return;
+  if(!confirm(`${c.name} の ${d} の出勤記録を削除しますか？`))return;
+  const updatedAt=new Date().toISOString();
+  syncManualClosingAttendanceFields(c,d,'','',true,updatedAt);
+  writeCastAttendanceLog(c,d,{in:'',out:'',absent:false,status:'',_attendanceCleared:true},{updatedAt});
+  if((state.businessSheets||[]).some(x=>x.businessDate===d))syncDerivedAfterReceiptEdit(d);
+  save();updateManualProfitPreview();renderManualAttendanceList(d);renderManualClosingList(d);
+  const selected=document.getElementById('manualCloseCast');if(selected&&selected.value===castId&&!manualClosingEditId){resetManualCastForm();loadOperationalCastIntoForm();}
 }
 function editManualClosingSheet(id){
   const r=(state.manualClosingSheets||[]).find(x=>x.id===id);if(!r)return;
@@ -4847,9 +4895,11 @@ function saveManualClosingSheet(){
   render();
   selectTitle.textContent='締め票入力';
   renderManualClosingList(d);
+  renderManualAttendanceList(d);
   resetManualCastForm();
   loadOperationalCastIntoForm();
   renderManualClosingList(d);
+  renderManualAttendanceList(d);
   alert(existing?'締め票入力を修正しました。':'締め票入力を保存しました。週間表・月間表へ反映済みです。');
 }
 function manualRowWorkMinutes(r){
@@ -4885,7 +4935,7 @@ function deleteManualClosingSheet(id){
     writeCastAttendanceLog(c,rec.businessDate,{in:base.in||'',out:base.out||'',absent:false,status:''},{updatedAt:new Date().toISOString()});
   }
   if((state.businessSheets||[]).some(x=>x.businessDate===rec.businessDate))syncDerivedAfterReceiptEdit(rec.businessDate);
-  save();render();renderManualClosingList(rec.businessDate);
+  save();render();renderManualAttendanceList(rec.businessDate);renderManualClosingList(rec.businessDate);
 }
 
 function openReceiptEditPanel(){
