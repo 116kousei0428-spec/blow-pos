@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v10-attendance-rebuild';
+const CACHE_NAME = 'blow-amami-pos-mobile-v11-attendance-recovery';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
