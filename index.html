@@ -5472,5 +5472,71 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
 </script>
 
 <!-- realtime sync: Firebase REST automatic save/polling, localStorage backup, loop prevention -->
+
+<!-- COMMON_POS_PARITY_PATCH_2026_09_17 -->
+<script id="common-pos-parity-20260917">
+(function(){
+  'use strict';
+  if(window.__COMMON_POS_PARITY_20260917__) return;
+  window.__COMMON_POS_PARITY_20260917__=true;
+
+  // 鹿児島で先行していた「選択日の締め票を直接印刷」を共通化。
+  // makeClosing() は描画のみで保存処理を行わないため、営業日を一時的に切り替えて
+  // 既存の店舗別締め票ロジックをそのまま使い、印刷用DOMを生成する。
+  if(typeof window.printManualClosingDate!=='function'){
+    window.printManualClosingDate=function(){
+      const dateInput=document.getElementById('manualCloseDate');
+      const d=(dateInput&&dateInput.value)||((typeof state!=='undefined'&&state)?state.businessDate:'');
+      if(!d){ alert('営業日を選択してください。'); return; }
+      if(typeof window.makeClosing!=='function' || typeof window.printElement!=='function'){
+        alert('締め票印刷機能を読み込めませんでした。');
+        return;
+      }
+      const area=document.getElementById('closingArea');
+      const oldHtml=area?area.innerHTML:'';
+      const oldDate=(typeof state!=='undefined'&&state)?state.businessDate:'';
+      try{
+        if(typeof state!=='undefined'&&state) state.businessDate=d;
+        window.makeClosing();
+        window.printElement('closingArea');
+      }catch(err){
+        console.error('過去締め票印刷エラー',err);
+        alert('締め票の印刷準備に失敗しました。');
+      }finally{
+        if(typeof state!=='undefined'&&state && oldDate) state.businessDate=oldDate;
+        if(area) area.innerHTML=oldHtml;
+      }
+    };
+  }
+
+  function ensureClosingPrintButton(){
+    const dateInput=document.getElementById('manualCloseDate');
+    const saveBtn=document.getElementById('manualClosingSaveButton')||document.getElementById('manualSaveBtn');
+    const row=saveBtn&&saveBtn.parentElement;
+    if(!dateInput||!row||document.getElementById('manualClosingPrintButton')) return;
+    const b=document.createElement('button');
+    b.id='manualClosingPrintButton';
+    b.type='button';
+    b.className='btn blue';
+    b.textContent='この日の締め票を印刷';
+    b.onclick=()=>window.printManualClosingDate();
+    row.appendChild(b);
+  }
+
+  const originalOpenClosing=window.openClosingSheetInput;
+  if(typeof originalOpenClosing==='function' && !originalOpenClosing.__commonParityWrapped){
+    const wrapped=function(){
+      const r=originalOpenClosing.apply(this,arguments);
+      setTimeout(ensureClosingPrintButton,40);
+      return r;
+    };
+    wrapped.__commonParityWrapped=true;
+    window.openClosingSheetInput=wrapped;
+  }
+
+  // 既に締め票入力モーダルが開いている状態で更新された場合にも反映。
+  setTimeout(ensureClosingPrintButton,80);
+})();
+</script>
 </body>
 </html>
