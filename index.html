@@ -3160,8 +3160,25 @@ function editPastReceipt(saleId){
   let itemRows=(t.items||[]).map(i=>`<tr><td>${esc(i.name)}${i.castId?'（'+esc(cname(i.castId))+'）':((i.target==='guest'||i.type==='guestShot')?'（ゲスト）':'')}</td><td class="right">${yen(i.price)}</td><td class="right">${i.qty||1}</td><td class="right">${yen((+i.price||0)*(+i.qty||1))}</td><td><button class="btn small" onclick="pastChangeItemQty('${saleId}','${i.id}',1)">＋</button> <button class="btn out small" onclick="pastChangeItemQty('${saleId}','${i.id}',-1)">－</button> <button class="btn bad small" onclick="pastDeleteItemQty('${saleId}','${i.id}')">数量削除</button></td></tr>`).join('')||'<tr><td colspan="5" class="muted">追加注文なし</td></tr>';
   selectTitle.textContent=`過去伝票修正 ${t.id}`;
   let cashEdit=sale.table.payment==='cash'?`<div><label>預かり金</label><input type="number" value="${sale.cashReceived||0}" onchange="updatePastCashReceived('${saleId}',this.value)"></div><div class="info"><b>おつり</b><span>${yen(Math.max(0,(+sale.cashReceived||0)-(+c.total||0)))}</span></div>`:`<div class="info"><b>預かり金</b><span>現金会計のみ</span></div><div class="info"><b>おつり</b><span>-</span></div>`;
-  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div><div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid3"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div><div><label>場内セット</label><select id="pastJounaiPhase">${pastJounaiPhaseOptions(t)}</select></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
+  const legacyJoinQty=(t.items||[]).filter(i=>i&&i.type==='guestJoin').reduce((a,i)=>a+(Number(i.guestCount)||0)*(Number(i.qty)||1),0);
+  const auditedJoin=(t.items||[]).some(i=>i&&i.type==='guestJoin'&&Number.isFinite(Number(i.guestsBeforeJoin)));
+  const joinRepair=legacyJoinQty?`<div class="section">途中合流人数の修正</div><div class="grid3"><div><label>初回人数</label><input type="number" min="1" value="${Math.max(1,Number(t.baseGuests)||1)}" onchange="updatePastBaseGuests('${saleId}',this.value)"></div><div class="info"><b>途中合流</b><span>${legacyJoinQty}名</span></div><div class="info"><b>現在人数</b><span>${Math.max(1,(Number(t.baseGuests)||1)+legacyJoinQty)}名</span></div></div><p class="muted">${auditedJoin?'合流前人数の記録から自動復元できます。':'旧版で保存された途中合流伝票は、初回人数だけ確認してください。変更すると伝票・売上・週間表・利益率・入客人数を再計算します。'}</p>`:'';
+  selectBody.innerHTML=`<div class="card" style="background:#f8fafc"><div class="grid3"><div class="info"><b>営業日</b><span>${sale.businessDate}</span></div><div class="info"><b>卓</b><span>${t.id}</span></div><div class="info"><b>修正後合計</b><span>${yen(c.total)}</span></div></div><p class="muted">伝票修正権限はこの端末に30分間だけ付与されています。セット料金・指名料金・預かり金・注文数を修正すると、伝票合計・売上履歴・週間表・利益率・営業終了保存データまで再計算します。</p><div class="section">料金修正</div><div class="grid4"><div><label>一人分セット料金</label><input type="number" value="${baseSeatUnit(t)}" onchange="updatePastBaseCharge('${saleId}',this.value)"></div><div><label>指名料金（1本/1セット）</label><input type="number" value="${Number(t.nominationUnitPrice??2000)}" onchange="updatePastNominationCharge('${saleId}',this.value)"></div>${cashEdit}</div>${joinRepair}<div class="summary" style="margin-top:10px">${cardStat('セット/延長',c.seat)}${cardStat('指名料金',c.nomination)}${cardStat('小計',c.subtotal)}${cardStat('合計',c.total)}</div><div class="grid3"><div><label>追加先</label><select id="pastCastSelect">${pastReceiptCastOptions()}</select></div><div><label>数量</label><input id="pastAddQty" type="number" min="1" value="1"></div><div><label>場内セット</label><select id="pastJounaiPhase">${pastJounaiPhaseOptions(t)}</select></div></div><div class="section">よく使う追加</div><div class="grid4"><button class="btn" onclick="pastAddItem('${saleId}','drink','ドリンク',1000,true)">ドリンク＋</button><button class="btn" onclick="pastAddItem('${saleId}','castShot','キャストショット',1000,true)">ショット＋</button><button class="btn out" onclick="pastAddItem('${saleId}','beer','ビール',1000,false)">ビール＋</button><button class="btn out" onclick="pastAddCustomItem('${saleId}')">その他＋</button></div><div class="section">指名・場内</div><div class="scroll"><table><thead><tr><th>項目</th><th>キャスト</th><th class="right">数</th><th>操作</th></tr></thead><tbody>${opRows}</tbody></table></div><div class="section">注文明細</div><div class="scroll"><table><thead><tr><th>商品</th><th class="right">単価</th><th class="right">数量</th><th class="right">小計</th><th>操作</th></tr></thead><tbody>${itemRows}</tbody></table></div><div class="row" style="margin-top:12px"><b>修正後合計：${yen(c.total)}</b><button class="btn out" onclick="lockReceiptEdit();closeModal('selectModal')">ロックして閉じる</button><button class="btn ok" onclick="closeModal('selectModal');render()">完了</button></div></div>`;
   openModal('selectModal');
+}
+function updatePastBaseGuests(saleId,value){
+  let sale=state.sales.find(s=>s.id===saleId);
+  if(!sale||!sale.table)return;
+  const before=saleAuditView(sale),t=sale.table;
+  const joined=(t.items||[]).filter(i=>i&&i.type==='guestJoin').reduce((a,i)=>a+(Number(i.guestCount)||0)*(Number(i.qty)||1),0);
+  const n=Math.max(1,Math.floor(Number(value)||1));
+  t.baseGuests=n;t.guests=n+joined;
+  const firstJoin=(t.items||[]).filter(i=>i&&i.type==='guestJoin').sort((a,b)=>new Date(a.joinedAt||a.createdAt||0)-new Date(b.joinedAt||b.createdAt||0))[0];
+  if(firstJoin)firstJoin.guestsBeforeJoin=n;
+  const rec=(state.visitorEntries||[]).find(v=>v.id===t.visitorEntryId);
+  if(rec)rec.guests=t.guests;
+  recalcPastSale(sale);logReceiptMutation(sale,before,'途中合流 初回人数変更');
+  render();editPastReceipt(saleId);
 }
 function updatePastBaseCharge(saleId,value){
   let sale=state.sales.find(s=>s.id===saleId);
@@ -5310,15 +5327,28 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
   const joinItems=t=>(Array.isArray(t&&t.items)?t.items:[]).filter(i=>i&&i.type==='guestJoin');
   const joinCount=t=>joinItems(t).reduce((a,i)=>a+(Number(i.guestCount)||0)*(Number(i.qty)||1),0);
   const joinCharge=t=>joinItems(t).reduce((a,i)=>a+(Number(i.price)||0)*(Number(i.qty)||1),0);
+  function inferBaseGuestsFromJoinAudit(t){
+    const js=joinItems(t).slice().sort((a,b)=>new Date(a.joinedAt||a.createdAt||0)-new Date(b.joinedAt||b.createdAt||0));
+    let priorJoined=0;
+    for(const i of js){
+      const before=Number(i.guestsBeforeJoin);
+      if(Number.isFinite(before)&&before>=1) return Math.max(1,before-priorJoined);
+      priorJoined+=(Number(i.guestCount)||0)*(Number(i.qty)||1);
+    }
+    return null;
+  }
   function ensureModel(t){
     if(!t)return t;
     t.items=Array.isArray(t.items)?t.items:[];
     const joined=joinCount(t), current=Math.max(1,Number(t.guests)||1);
-    // baseGuests は「初回セットにいた人数」。一度確定したら現在人数との差分から自動再計算しない。
-    // 途中合流者を baseGuests に混ぜると、初回セット料金 + 途中合流料金の二重請求になるため。
+    const auditedBase=inferBaseGuestsFromJoinAudit(t);
+    // 新しい途中合流データは「合流前人数」を保存し、そこから初回人数を復元できる。
+    if(auditedBase!==null) t.baseGuests=auditedBase;
+    // 旧データで baseGuests 自体が無い場合だけ、現在人数-合流人数で安全に補完する。
     if(!Number.isFinite(Number(t.baseGuests))) t.baseGuests=Math.max(1,current-joined);
+    // 旧データで既に誤った baseGuests が保存済みのケースは自動推測で上書きしない。
+    // 本当に初回2名だった伝票等を壊す可能性があるため、過去伝票修正の「初回人数」で明示修正する。
     t.baseGuests=Math.max(1,Number(t.baseGuests)||1);
-    // 現在人数は常に「初回人数 + 途中合流履歴」から派生させる。
     t.guests=Math.max(1,t.baseGuests+joined);
     return t;
   }
@@ -5440,7 +5470,8 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
     const t=(state.tables||[]).find(x=>x.id===guestJoinTableId.value);if(!t)return;if(!guestJoinDate.value||!guestJoinTime.value)return alert('合流日時を入力してください');
     const tv=normalizeTimeValue(guestJoinTime.value,'exact',JOIN_MAX_HOUR),parts=tv.split(':').map(Number),minsClock=(parts[0]||0)*60+(parts[1]||0);if(!tv||minsClock>JOIN_MAX_MINUTES)return alert('合流時間を確認してください');
     const n=Math.max(1,Number(guestJoinGuests.value)||1),unit=Math.max(0,Number(guestJoinUnitPrice.value)||0),dt=parseBusinessDT(guestJoinDate.value,tv);ensureModel(t);
-    const item={id:uuid(),type:'guestJoin',name:`途中合流 ${n}名（1人 ${unit.toLocaleString('ja-JP')}円）`,price:n*unit,qty:1,guestCount:n,unitPrice:unit,joinedAt:dt.toISOString(),createdAt:new Date().toISOString()};
+    const beforeJoinGuests=Math.max(1,Number(t.guests)||1);
+    const item={id:uuid(),type:'guestJoin',name:`途中合流 ${n}名（1人 ${unit.toLocaleString('ja-JP')}円）`,price:n*unit,qty:1,guestCount:n,unitPrice:unit,guestsBeforeJoin:beforeJoinGuests,joinedAt:dt.toISOString(),createdAt:new Date().toISOString()};
     t.items.push(item);t.guests=Math.max(1,(Number(t.baseGuests)||1)+joinCount(t));if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);refreshExtensions(t);closeModal('guestJoinModal');render();
   };
 
@@ -5468,9 +5499,12 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
   render=function(){normalizeAll();return oldRender();};
   // 回帰テスト: 1名入卓 + 1名途中合流でも初回セット人数は1名のまま。
   try{
-    const _joinTest={guests:1,baseGuests:1,startedAt:new Date().toISOString(),items:[{id:'_join_test',type:'guestJoin',price:4000,qty:1,guestCount:1,unitPrice:4000,joinedAt:new Date().toISOString()}]};
+    const _joinTest={guests:1,baseGuests:1,startedAt:new Date().toISOString(),items:[{id:'_join_test',type:'guestJoin',price:4000,qty:1,guestCount:1,unitPrice:4000,guestsBeforeJoin:1,joinedAt:new Date().toISOString()}]};
     ensureModel(_joinTest);
     console.assert(_joinTest.baseGuests===1&&_joinTest.guests===2,'途中合流で初回セット人数を増やさない');
+    const _repairTest={guests:3,baseGuests:2,startedAt:new Date().toISOString(),items:[{id:'_repair_test',type:'guestJoin',price:4000,qty:1,guestCount:1,unitPrice:4000,guestsBeforeJoin:1,joinedAt:new Date().toISOString()}]};
+    ensureModel(_repairTest);
+    console.assert(_repairTest.baseGuests===1&&_repairTest.guests===2,'合流前人数の記録から二重加算状態を自動復元する');
   }catch(e){console.warn('途中合流回帰テスト失敗',e);}
   window.__guestJoinDebug={ensureModel,guestCountAt,joinCount,joinCharge,refreshExtensions,store:STORE_NAME};
   normalizeAll();ensureModal();render();
