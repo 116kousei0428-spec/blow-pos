@@ -5314,10 +5314,12 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
     if(!t)return t;
     t.items=Array.isArray(t.items)?t.items:[];
     const joined=joinCount(t), current=Math.max(1,Number(t.guests)||1);
+    // baseGuests は「初回セットにいた人数」。一度確定したら現在人数との差分から自動再計算しない。
+    // 途中合流者を baseGuests に混ぜると、初回セット料金 + 途中合流料金の二重請求になるため。
     if(!Number.isFinite(Number(t.baseGuests))) t.baseGuests=Math.max(1,current-joined);
-    const expected=Math.max(1,(Number(t.baseGuests)||1)+joined);
-    if(current!==expected){ t.baseGuests=Math.max(1,current-joined); }
-    t.guests=Math.max(1,(Number(t.baseGuests)||1)+joined);
+    t.baseGuests=Math.max(1,Number(t.baseGuests)||1);
+    // 現在人数は常に「初回人数 + 途中合流履歴」から派生させる。
+    t.guests=Math.max(1,t.baseGuests+joined);
     return t;
   }
   function guestCountAt(t,dt){
@@ -5439,7 +5441,7 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
     const tv=normalizeTimeValue(guestJoinTime.value,'exact',JOIN_MAX_HOUR),parts=tv.split(':').map(Number),minsClock=(parts[0]||0)*60+(parts[1]||0);if(!tv||minsClock>JOIN_MAX_MINUTES)return alert('合流時間を確認してください');
     const n=Math.max(1,Number(guestJoinGuests.value)||1),unit=Math.max(0,Number(guestJoinUnitPrice.value)||0),dt=parseBusinessDT(guestJoinDate.value,tv);ensureModel(t);
     const item={id:uuid(),type:'guestJoin',name:`途中合流 ${n}名（1人 ${unit.toLocaleString('ja-JP')}円）`,price:n*unit,qty:1,guestCount:n,unitPrice:unit,joinedAt:dt.toISOString(),createdAt:new Date().toISOString()};
-    t.items.push(item);t.guests=(Number(t.guests)||1)+n;if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);refreshExtensions(t);closeModal('guestJoinModal');render();
+    t.items.push(item);t.guests=Math.max(1,(Number(t.baseGuests)||1)+joinCount(t));if(typeof syncVisitorGuests==='function')syncVisitorGuests(t,t.guests);refreshExtensions(t);closeModal('guestJoinModal');render();
   };
 
   const oldRenderTables=renderTables;
@@ -5464,6 +5466,12 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
 
   const oldRender=render;
   render=function(){normalizeAll();return oldRender();};
+  // 回帰テスト: 1名入卓 + 1名途中合流でも初回セット人数は1名のまま。
+  try{
+    const _joinTest={guests:1,baseGuests:1,startedAt:new Date().toISOString(),items:[{id:'_join_test',type:'guestJoin',price:4000,qty:1,guestCount:1,unitPrice:4000,joinedAt:new Date().toISOString()}]};
+    ensureModel(_joinTest);
+    console.assert(_joinTest.baseGuests===1&&_joinTest.guests===2,'途中合流で初回セット人数を増やさない');
+  }catch(e){console.warn('途中合流回帰テスト失敗',e);}
   window.__guestJoinDebug={ensureModel,guestCountAt,joinCount,joinCharge,refreshExtensions,store:STORE_NAME};
   normalizeAll();ensureModal();render();
 })();
@@ -5536,6 +5544,94 @@ console.assert(typeof loadOperationalCastIntoForm==='function','営業画面→�
 
   // 既に締め票入力モーダルが開いている状態で更新された場合にも反映。
   setTimeout(ensureClosingPrintButton,80);
+})();
+</script>
+
+<!-- COMMON_OPERATION_PARITY_V2_GUEST_ANALYTICS_20260917 -->
+<script id="common-operation-parity-v2-guest-analytics-20260917">
+(function(){
+  'use strict';
+  if(window.__COMMON_GUEST_ANALYTICS_V2__) return;
+  window.__COMMON_GUEST_ANALYTICS_V2__=true;
+
+  function salesPool(){
+    const out=[],seen=new Set();
+    const add=s=>{
+      if(!s||!s.businessDate)return;
+      const key=String(s.id||`${s.businessDate}|${s.checkoutAt||''}|${s.table?.id||''}|${out.length}`);
+      if(seen.has(key))return; seen.add(key); out.push(s);
+    };
+    (state.sales||[]).forEach(add);
+    (state.businessSheets||[]).forEach(sh=>{ if(sh&&Array.isArray(sh.sales)) sh.sales.forEach(add); });
+    return out;
+  }
+  function saleGuests(s){
+    const t=s&&s.table||{};
+    const direct=Number(t.guests);
+    if(Number.isFinite(direct)&&direct>0)return direct;
+    const sex=(Number(t.maleGuests)||0)+(Number(t.femaleGuests)||0);
+    return sex>0?sex:0;
+  }
+  function monthPrefix(date){ return String(date||state.businessDate||'').slice(0,7); }
+  function yenSafe(n){ try{return typeof yen==='function'?yen(n):Math.round(Number(n)||0).toLocaleString('ja-JP')}catch(e){return String(Math.round(Number(n)||0))} }
+  function escSafe(v){ try{return typeof esc==='function'?esc(v):String(v??'')}catch(e){return String(v??'')} }
+
+  window.renderCommonGuestAnalytics=function(){
+    const root=document.getElementById('commonGuestAnalyticsArea'); if(!root)return;
+    const dateEl=document.getElementById('commonGuestAnalyticsDate');
+    const base=(dateEl&&dateEl.value)||state.businessDate;
+    if(dateEl&&!dateEl.value)dateEl.value=base;
+    const all=salesPool();
+    const day=all.filter(s=>s.businessDate===base);
+    const month=all.filter(s=>String(s.businessDate||'').startsWith(monthPrefix(base)));
+    const dayGuests=day.reduce((a,s)=>a+saleGuests(s),0);
+    const monthGuests=month.reduce((a,s)=>a+saleGuests(s),0);
+    const dayTables=day.length, monthTables=month.length;
+    const active=(state.tables||[]).filter(t=>t&&t.status==='busy');
+    const activeGuests=active.reduce((a,t)=>a+(Number(t.guests)||((Number(t.maleGuests)||0)+(Number(t.femaleGuests)||0))),0);
+    const avgDay=dayTables?dayGuests/dayTables:0, avgMonth=monthTables?monthGuests/monthTables:0;
+    const byTable={};
+    day.forEach(s=>{const id=String(s.table?.id||'-');const g=saleGuests(s);byTable[id]=(byTable[id]||0)+g});
+    const rows=Object.entries(byTable).sort((a,b)=>b[1]-a[1]).map(([id,g])=>`<tr><td>${escSafe(id)}</td><td class="right">${g}名</td></tr>`).join('')||'<tr><td colspan="2" class="muted">会計済みデータなし</td></tr>';
+    root.innerHTML=`
+      <div class="card" style="margin-top:12px">
+        <div class="row"><h3>入客分析</h3><button class="btn out small" onclick="renderCommonGuestAnalytics()">再計算</button></div>
+        <div class="grid2"><div><label>基準日</label><input id="commonGuestAnalyticsDate" type="date" value="${escSafe(base)}" onchange="renderCommonGuestAnalytics()"></div><div class="info"><b>対象月</b><span>${escSafe(monthPrefix(base))}</span></div></div>
+        <div class="summary" style="margin-top:10px">
+          <div class="card stat"><div class="label">当日入客</div><div class="val">${dayGuests}名</div></div>
+          <div class="card stat"><div class="label">当日会計卓</div><div class="val">${dayTables}卓</div></div>
+          <div class="card stat"><div class="label">当日平均</div><div class="val">${avgDay.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}名/卓</div></div>
+          <div class="card stat"><div class="label">現在入客</div><div class="val">${activeGuests}名</div></div>
+          <div class="card stat"><div class="label">月間入客</div><div class="val">${monthGuests}名</div></div>
+          <div class="card stat"><div class="label">月間会計卓</div><div class="val">${monthTables}卓</div></div>
+          <div class="card stat"><div class="label">月間平均</div><div class="val">${avgMonth.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}名/卓</div></div>
+        </div>
+        <div class="scroll" style="margin-top:10px"><table><thead><tr><th>当日 卓</th><th class="right">入客数</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="muted" style="margin-top:8px">会計済み伝票の人数を基準に集計し、現在稼働中の人数は別枠で表示します。給与・バック計算には影響しません。</p>
+      </div>`;
+  };
+
+  function install(){
+    const manage=document.getElementById('manage'); if(!manage)return;
+    if(!document.getElementById('commonGuestAnalyticsArea')){
+      const holder=document.createElement('div'); holder.id='commonGuestAnalyticsArea';
+      const anchor=document.getElementById('visitorCountArea')||document.getElementById('receiptAuditArea')||document.getElementById('historyPanel');
+      if(anchor&&anchor.parentNode===manage) manage.insertBefore(holder,anchor); else manage.appendChild(holder);
+    }
+    const head=manage.querySelector('.row');
+    if(head&&!head.querySelector('[data-common-guest-analytics]')){
+      const b=document.createElement('button');b.className='btn blue';b.dataset.commonGuestAnalytics='1';b.textContent='入客分析';b.onclick=()=>{document.getElementById('commonGuestAnalyticsArea')?.scrollIntoView({behavior:'smooth',block:'start'});renderCommonGuestAnalytics()};
+      const hist=[...head.querySelectorAll('button')].find(x=>x.textContent.trim()==='履歴');
+      if(hist)hist.insertAdjacentElement('afterend',b);else head.appendChild(b);
+    }
+    renderCommonGuestAnalytics();
+  }
+  install();
+  const oldRender=window.render;
+  if(typeof oldRender==='function'&&!oldRender.__commonGuestAnalyticsV2){
+    const wrapped=function(){const r=oldRender.apply(this,arguments);try{renderCommonGuestAnalytics()}catch(e){}return r};
+    wrapped.__commonGuestAnalyticsV2=true;window.render=wrapped;
+  }
 })();
 </script>
 </body>
