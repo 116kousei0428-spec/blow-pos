@@ -1,4 +1,4 @@
-const CACHE_NAME = 'blow-amami-pos-mobile-v20-guestjoin-standalone-fix';
+const CACHE_NAME = 'blow-amami-pos-mobile-v18-guestjoin-doublefix';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
