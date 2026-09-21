@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "BLOW 2nd POS 種子島",
+  "name": "BLOW 奄美 POS",
   "short_name": "BLOW POS",
-  "description": "BLOW 2nd 種子島 POS",
+  "description": "BLOW 奄美 POS",
   "lang": "ja",
   "start_url": "./",
   "scope": "./",
@@ -12,13 +12,13 @@
   "theme_color": "#111827",
   "icons": [
     {
-      "src": "icons/icon-192.png",
+      "src": "amami-icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "icons/icon-512.png",
+      "src": "amami-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

@@ -1,9 +1,9 @@
-const CACHE_NAME = 'blow2nd-pos-tanegashima-mobile-v6-anejo-extension-analytics';
+const CACHE_NAME = 'blow-amami-pos-guestjoin-manualfix-20260919-v3';
 const STATIC_ASSETS = [
   './index.html',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+  './amami-icon-192.png',
+  './amami-icon-512.png'
 ];
 
 self.addEventListener('install', event => {
@@ -31,7 +31,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // POS本体は常にネット優先。更新版があるのに古いHTMLを固定表示しない。
+  // 種子島版と同じくPOS本体はネット優先。更新版HTMLを古いキャッシュで固定しない。
   if (request.mode === 'navigate' || url.pathname.endsWith('/index.html')) {
     event.respondWith(
       fetch(request)
@@ -49,7 +49,6 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // manifest / icon はキャッシュ優先でよい。
   event.respondWith(
     caches.match(request).then(cached => cached || fetch(request).then(response => {
       if (response && response.ok) {
