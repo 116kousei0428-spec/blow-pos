@@ -3533,14 +3533,23 @@ function restoreBackup(ev){
 }
 
 
-function makeMonthly(){
-  const ym=state.businessDate.slice(0,7);
+function shiftMonthlyCloseMonth(delta){
+  const picker=document.getElementById('monthlyCloseMonth');
+  const base=(picker&&/^\d{4}-(0[1-9]|1[0-2])$/.test(picker.value))?picker.value:state.businessDate.slice(0,7);
+  const [year,month]=base.split('-').map(Number);
+  const next=new Date(year,month-1+delta,1);
+  makeMonthly(`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}`);
+}
+function makeMonthly(selectedMonth){
+  const existing=document.getElementById('monthlyCloseMonth');
+  const candidate=typeof selectedMonth==='string'?selectedMonth:(existing?.value||state.businessDate.slice(0,7));
+  const ym=/^\d{4}-(0[1-9]|1[0-2])$/.test(candidate)?candidate:state.businessDate.slice(0,7);
   // beta28: 月締め票は売上がある日だけでなく、月初〜月末の全日付を基準に集計する。
   // 売上0でも出勤/締め票後入力がある日は、人件費・バックを反映して純利益をマイナス表示する。
   let dates=monthDays(ym+'-01');
   let rows=dates.map(d=>{let s=daySum(d);return `<tr><td>${d}</td><td class="right">${yen(s.sales)}</td><td class="right">${yen(s.labor)}</td><td class="right">${yen(s.back)}</td><td class="right">${yen(s.payroll)}</td><td class="right">${yen(s.expenses)}</td><td class="right">${yen(s.profit)}</td></tr>`}).join('');
   let total=dates.reduce((a,d)=>{let s=daySum(d);a.sales+=s.sales;a.labor+=s.labor;a.back+=s.back;a.payroll+=s.payroll;a.expenses+=s.expenses;a.profit+=s.profit;return a},{sales:0,labor:0,back:0,payroll:0,expenses:0,profit:0});
-  closingArea.innerHTML=`<div class="card"><div class="row"><h2>月締め票 ${ym}</h2><div class="row no-print"><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveSheetScreenshot('closingArea','月締め票_'+ym,this)">スクショ保存</button></div></div><div class="scroll"><table><thead><tr><th>日付</th><th class="right">売上</th><th class="right">時間給合計</th><th class="right">バック合計</th><th class="right">人件費合計</th><th class="right">仕入れ支出</th><th class="right">純利益</th></tr></thead><tbody>${rows}<tr><th>合計</th><th class="right">${yen(total.sales)}</th><th class="right">${yen(total.labor)}</th><th class="right">${yen(total.back)}</th><th class="right">${yen(total.payroll)}</th><th class="right">${yen(total.expenses)}</th><th class="right">${yen(total.profit)}</th></tr></tbody></table></div></div>`;
+  closingArea.innerHTML=`<div class="card"><div class="row"><h2>月締め票 ${ym}</h2><div class="row no-print" style="flex-wrap:wrap"><button class="btn out small" onclick="shiftMonthlyCloseMonth(-1)">前月</button><label for="monthlyCloseMonth" style="margin:0">表示月</label><input id="monthlyCloseMonth" type="month" value="${ym}" aria-label="月締め票の表示月" onchange="makeMonthly(this.value)" style="width:auto;min-width:150px"><button class="btn out small" onclick="shiftMonthlyCloseMonth(1)">翌月</button><button class="btn out" onclick="printElement('closingArea')">締め票印刷</button><button class="btn blue" onclick="saveSheetScreenshot('closingArea','月締め票_'+ym,this)">スクショ保存</button></div></div><div class="scroll"><table><thead><tr><th>日付</th><th class="right">売上</th><th class="right">時間給合計</th><th class="right">バック合計</th><th class="right">人件費合計</th><th class="right">仕入れ支出</th><th class="right">純利益</th></tr></thead><tbody>${rows}<tr><th>合計</th><th class="right">${yen(total.sales)}</th><th class="right">${yen(total.labor)}</th><th class="right">${yen(total.back)}</th><th class="right">${yen(total.payroll)}</th><th class="right">${yen(total.expenses)}</th><th class="right">${yen(total.profit)}</th></tr></tbody></table></div></div>`;
 }
 
 function checkout(id,extra={}){
